@@ -30,7 +30,7 @@ The killer move: **gotchas in L1b** + **verbatim Recent turns in L2**. Future se
 ## Requirements
 
 - **bash** (Git Bash on Windows, native on macOS/Linux)
-- **GNU `date`** — needed for `date -d <ISO>`. macOS `/usr/bin/date` is BSD and won't work; install `coreutils` (`brew install coreutils`) and ensure `gdate`/`date` from coreutils is on PATH, OR replace `date -d` calls in `session-start.sh` with `gdate -d`.
+- **`date`** — no GNU requirement. The hook tries `gdate -d`, then `date -d` (GNU), then `date -j -u -f` (BSD/macOS), so stock macOS works without `coreutils`.
 - `grep -oE`, `sed` — present everywhere
 
 ## Install (or upgrade)
@@ -162,7 +162,7 @@ cp <pkg>/templates/project.md.fallback.template ~/.claude/projects/<slug>/memory
 $EDITOR ~/.claude/projects/<slug>/memory/project.md
 ```
 
-Compute slug from cwd: `C:\dev\foo` → `C--dev-foo` (drive uppercase + `--` + remaining path with `/`→`-`).
+Compute slug from cwd — Windows/Git-Bash `C:\dev\foo` → `C--dev-foo` (drive uppercase + `--` + rest with `/`→`-`); macOS/Linux `/Users/me/dev/foo` → `-Users-me-dev-foo` (every `/` → `-`, **including the leading one**). Matches Claude Code's existing `~/.claude/projects/` directory naming.
 
 ### 6. Verify
 
@@ -279,7 +279,7 @@ This scales well — a real reverse-engineering project in this workflow accumul
 - **No journal/archive layer.** Sessions are about different tasks; carrying them forward is noise. Layer = decay rate, period.
 - **Promotion is explicit.** No auto-archival. The user, not the model, decides what crosses session boundaries.
 - **Gotchas in L1b are the highest-leverage memory.** Every project accumulates non-obvious foot-guns. A one-paragraph warning in `gotchas.md` saves the next agent (or your future self) hours of debugging.
-- **Project slug rule:** `C:\dev\foo` → `C--dev-foo` (drive uppercase + `--` + remaining path with `/`→`-`). Matches Claude Code's existing `~/.claude/projects/` directory naming.
+- **Project slug rule:** Windows/Git-Bash `C:\dev\foo` → `C--dev-foo` (drive uppercase + `--` + rest with `/`→`-`); macOS/Linux `/Users/me/dev/foo` → `-Users-me-dev-foo` (every `/` → `-`, **including the leading one**). Matches Claude Code's existing `~/.claude/projects/` directory naming.
 - **`last_updated` lives in YAML frontmatter** (parseable by hook, Obsidian, eyes). Legacy HTML-comment format still works.
 - **Pure bash hooks**, no Python (Python is often missing on Windows).
 - **Recent turns kept verbatim.** The compact summarizer paraphrases away texture; verbatim quotes preserve it.
@@ -326,8 +326,8 @@ Conventions kept compatible:
   ```
   Or install Node system-wide via [NodeSource](https://github.com/nodesource/distributions) to avoid the issue entirely. See the note in the `qmd` install section above.
 - **Hooks don't fire.** Check `~/.claude/debug/hook-trace.log` after starting a session. Empty? `settings.json` malformed (`python -m json.tool < ~/.claude/settings.json`) or path wrong. Use `~/` not `$HOME` in the JSON — Claude Code expands tilde.
-- **macOS: `date: illegal option -- d`.** You're using BSD `date`. `brew install coreutils` and either prepend its bin to PATH or replace `date -d` with `gdate -d` in `session-start.sh`.
-- **Slug looks wrong.** The hook computes it from `$PWD` in unix form (`/c/dev/foo`). On Windows, Git Bash gives this naturally. If you see `C--dev--foo` (double dash mid-path) you're running an older draft — the line should read `slug="${drive}--${rest//\//-}"` (single dash inside the path).
+- **macOS: `date: illegal option -- d`.** Fixed in v6.2.5 — the hook falls back to BSD `date -j -u -f`. If you still see it, you're on an older `session-start.sh`; re-run `install.sh`.
+- **Slug looks wrong.** The hook computes it from `$PWD` in unix form. On Windows/Git-Bash (`/c/dev/foo`) you should get `C--dev-foo`; if you see `C--dev--foo` (double dash mid-path) you're on an older draft — the line should read `slug="${drive}--${rest//\//-}"`. On macOS/Linux the slug **keeps its leading dash** (`/Users/me/dev/foo` → `-Users-me-dev-foo`); if yours lacks it, you're on a pre-v6.2.5 `session-start.sh` that stripped it, and the staleness check never fires because it stats a directory that doesn't exist. Compare against `ls ~/.claude/projects/`.
 - **Staleness warning never fires.** Model didn't refresh `last_updated` on previous writes. The "no marker" branch will fire instead, which is the intended fallback.
 - **Model ignores the staleness warning.** Paste rule 5 from CLAUDE.md back at it. The hook injects the warning text but the model has to act on it.
 - **Model didn't auto-load `<repo>/CLAUDE.md`.** That's Claude Code's built-in behaviour, not the hook's job. Make sure cwd is inside the repo (not a sibling), and that `<repo>/CLAUDE.md` exists at the repo root (not in a subdir).

@@ -20,7 +20,11 @@ Codebase facts (architecture, conventions, gotchas) live with the codebase. Pers
 | **L1-fallback** | `~/.claude/projects/<slug>/memory/project.md` | every session start (via SessionStart hook) | no | for projects without a repo, or where in-repo L1 isn't appropriate (proprietary, solo) |
 | **L2 Session** | `~/.claude/projects/<slug>/memory/SESSION.md` | every session start + after every compact | no | per-task working state — survives compact, dies with task |
 
-`<slug>` = cwd with drive letter, then `--`, then remaining path with `\`/`/` replaced by single `-` (e.g. `C:\dev\local` → `C--dev-local`). Matches Claude Code's `~/.claude/projects/` directory naming.
+`<slug>` = cwd rendered as a directory name, matching Claude Code's own `~/.claude/projects/` naming:
+- **Windows/Git-Bash** — drive letter uppercased, then `--`, then the rest with `/` → `-` (e.g. `C:\dev\local` → `C--dev-local`).
+- **macOS/Linux** — the full POSIX path with every `/` replaced by `-`, **including the leading one** (e.g. `/Users/me/dev/foo` → `-Users-me-dev-foo`). The leading dash is part of the name; dropping it points at a directory that does not exist.
+
+When in doubt, `ls ~/.claude/projects/` is authoritative.
 
 `<repo>` = the git repo root for the current cwd (`git rev-parse --show-toplevel`).
 

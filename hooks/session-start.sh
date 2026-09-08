@@ -66,17 +66,35 @@ elif [[ "$cwd_unix" =~ ^/([a-zA-Z])/?$ ]]; then
   drive="${BASH_REMATCH[1]^^}"
   slug="${drive}-"
 else
+  # Unix (macOS/Linux): /Users/me/dev/foo -> -Users-me-dev-foo.
+  # The LEADING DASH IS PART OF THE NAME — Claude Code derives the directory
+  # under ~/.claude/projects/ by replacing every "/" including the root one.
+  # Stripping it made the hook stat a path that never exists, so SESSION.md was
+  # never found and the staleness check silently never fired on macOS/Linux.
   slug="${cwd_unix//\//-}"
-  slug="${slug#-}"
 fi
 
 session_file="$CLAUDE_HOME/projects/${slug}/memory/SESSION.md"
+
+# ISO-8601-UTC -> epoch, portable across GNU and BSD date.
+# GNU has `date -d <iso>`; BSD/macOS has neither -d nor ISO parsing, and needs
+# `date -j -u -f <fmt>`. Without this the staleness check got last_epoch=0 on
+# macOS and was silently skipped.
+to_epoch() {
+  local iso="$1" e norm
+  e=$(gdate -d "$iso" +%s 2>/dev/null) && { printf '%s' "$e"; return; }
+  e=$(date  -d "$iso" +%s 2>/dev/null) && { printf '%s' "$e"; return; }
+  norm="${iso%Z}"; norm="${norm%%.*}"; norm="${norm%%+*}"
+  e=$(date -j -u -f "%Y-%m-%dT%H:%M:%S" "$norm" +%s 2>/dev/null) && { printf '%s' "$e"; return; }
+  e=$(date -j -u -f "%Y-%m-%dT%H:%M"    "$norm" +%s 2>/dev/null) && { printf '%s' "$e"; return; }
+  printf '0'
+}
 
 stale_warning=""
 if [[ -f "$session_file" ]]; then
   last_updated=$(grep -oE 'last_updated:[[:space:]]*[0-9T:.Z+-]+' "$session_file" | head -n1 | sed 's/last_updated:[[:space:]]*//')
   if [[ -n "$last_updated" ]]; then
-    last_epoch=$(date -d "$last_updated" +%s 2>/dev/null || echo 0)
+    last_epoch=$(to_epoch "$last_updated")
     now_epoch=$(date +%s)
     if [[ "$last_epoch" -gt 0 ]]; then
       age=$((now_epoch - last_epoch))
@@ -106,7 +124,7 @@ base='MEMORY PROTOCOL ACTIVE (3-layer system, see ~/.claude/CLAUDE.md). The defa
 
 Before your first response:
 1. Read ~/.claude/memory/IDENTITY.md (L0).
-2. Derive project slug from cwd (drive letter + dashes, e.g. C:\\dev\\local -> C--dev-local).
+2. Derive project slug from cwd. Windows/Git-Bash: drive letter + "--" + rest, e.g. C:\\dev\\local -> C--dev-local. macOS/Linux: the full POSIX path with every "/" replaced by "-", INCLUDING the leading one, e.g. /Users/me/dev/foo -> -Users-me-dev-foo. Either way this matches the existing ~/.claude/projects/<slug>/ directory name.
 3. If ~/.claude/projects/<slug>/memory/SESSION.md exists, read it FIRST — it is your working state from before any compact/restart. If absent, create from the template in CLAUDE.md when the user starts substantive work.
 4. If ~/.claude/projects/<slug>/memory/project.md exists, read it.
 

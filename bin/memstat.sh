@@ -58,6 +58,41 @@ human_age() {  # seconds -> "1h 2m" / "3m" / "12s"
   else printf '%ds' "$s"; fi
 }
 
+# --- BSD/macOS portability shims -------------------------------------------
+# macOS ships neither GNU coreutils' `timeout` nor GNU `stat`/`ps` syntax.
+
+# Run with a timeout when one exists, otherwise run bare (better a slow call
+# than no call — without this every `qmd status` returned empty on macOS and
+# the INDEX/HEALTH sections reported "unavailable" forever).
+run_timeout() {
+  local secs="$1"; shift
+  if   command -v timeout  >/dev/null 2>&1; then timeout  "$secs" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$secs" "$@"
+  else "$@"; fi
+}
+
+# File mtime as epoch. GNU: stat -c %Y. BSD/macOS: stat -f %m.
+file_mtime() {
+  stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0
+}
+
+# BSD `ps -o etime` yields [[DD-]HH:]MM:SS — normalize to plain seconds.
+elapsed_to_secs() {
+  local t="$1" day_secs=0 time_part
+  [[ "$t" =~ ^[0-9]+$ ]] && { printf '%s' "$t"; return; }
+  time_part="$t"
+  if [[ "$t" == *-* ]]; then
+    day_secs=$(( 10#${t%%-*} * 86400 ))
+    time_part="${t##*-}"
+  fi
+  local -a parts; IFS=: read -r -a parts <<< "$time_part"
+  case ${#parts[@]} in
+    2) printf '%s' $(( day_secs + 10#${parts[0]} * 60   + 10#${parts[1]} )) ;;
+    3) printf '%s' $(( day_secs + 10#${parts[0]} * 3600 + 10#${parts[1]} * 60 + 10#${parts[2]} )) ;;
+    *) printf '%s' "$day_secs" ;;
+  esac
+}
+
 # --- gather: memory-related processes (node running qmd, ctags) ---
 # Output format: pid|ram_mb|age_seconds|kind  (one line per process)
 # NOTE: PowerShell block uses bash DOUBLE-quotes with \" / \$ escaping. Do NOT
@@ -77,12 +112,25 @@ get_procs() {
       }
     " 2>/dev/null | tr -d '\r' | grep -E '^[0-9]+\|'
   else
-    # Linux / macOS: etimes = elapsed seconds (requires modern ps, available on
-    # GNU coreutils and macOS 10.9+). rss is in KiB on both platforms.
-    ps -eo pid,etimes,rss,command 2>/dev/null \
+    # Linux / macOS. GNU ps has `etimes` (plain seconds); BSD/macOS ps does NOT
+    # — only `etime` ([[DD-]HH:]MM:SS). Requesting an unsupported keyword makes
+    # macOS ps drop that column *silently* rather than error, shifting every
+    # field left, so a command path landed in $rss and `$(( rss / 1024 ))` blew
+    # up with "syntax error: operand expected". Detect support, then normalize.
+    # rss is in KiB on both platforms.
+    local ps_out etime_mode
+    if ps -eo pid,etimes,rss,command >/dev/null 2>&1; then
+      etime_mode=secs;  ps_out=$(ps -eo pid,etimes,rss,command 2>/dev/null)
+    else
+      etime_mode=clock; ps_out=$(ps -eo pid,etime,rss,command  2>/dev/null)
+    fi
+    printf '%s\n' "$ps_out" \
       | grep -E 'qmd (embed|update|query|search|vsearch)|ctags' \
       | grep -v grep \
       | while read -r pid age rss rest; do
+          # Never do arithmetic on an unvalidated field.
+          [[ "$pid" =~ ^[0-9]+$ && "$rss" =~ ^[0-9]+$ ]] || continue
+          [[ "$etime_mode" == clock ]] && age=$(elapsed_to_secs "$age")
           local ram=$(( rss / 1024 ))
           local kind
           case "$rest" in
@@ -139,10 +187,10 @@ get_cpu_time() {
 # a concurrent `qmd update`).
 get_qmd_status() {
   local out
-  out=$(timeout 25 qmd status 2>/dev/null | tr -d '\r')
+  out=$(run_timeout 25 qmd status 2>/dev/null | tr -d '\r')
   if ! echo "$out" | grep -qiE 'Vectors:'; then
     sleep 1
-    out=$(timeout 25 qmd status 2>/dev/null | tr -d '\r')
+    out=$(run_timeout 25 qmd status 2>/dev/null | tr -d '\r')
   fi
   printf '%s' "$out"
 }
@@ -209,7 +257,7 @@ render() {
   for lg in qmd-refresh.log qmd-embed.log qmd-embed-retry.log; do
     local p="$CLAUDE_HOME/logs/$lg"
     [[ -f "$p" ]] || continue
-    local mt; mt=$(stat -c %Y "$p" 2>/dev/null || echo 0)
+    local mt; mt=$(file_mtime "$p")
     local lastline; lastline=$(grep -vE '^\s*$|\[?\?25|^\[2K' "$p" 2>/dev/null | tail -1 | tr -d '\r' | cut -c1-58)
     printf '  %s%-22s%s %s ago  %s%s%s\n' "$c_dim" "$lg" "$c_reset" "$(human_age $((now - mt)))" "$c_dim" "$lastline" "$c_reset"
   done

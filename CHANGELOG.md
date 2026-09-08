@@ -1,5 +1,20 @@
 # Changelog
 
+## v6.2.5 — BSD/macOS portability (the Unix paths v6.2.4 added, actually working on macOS)
+
+v6.2.4 introduced non-Windows code paths but they were only exercised on Linux. Every one of them assumed GNU userland, so on stock macOS the staleness check was dead and `/memstat` was half-blank. All five fixes are additive — GNU/Windows behaviour is unchanged.
+
+**Fixed**
+- **Staleness detection never fired on macOS/Linux — the slug dropped its leading dash.** `hooks/session-start.sh` computed the Unix slug as `slug="${cwd_unix//\//-}"` then stripped the leading `-` with `slug="${slug#-}"`. But Claude Code names the directory by replacing *every* `/` including the root one, so `/Users/me/dev/foo` is `-Users-me-dev-foo`, not `Users-me-dev-foo`. The hook stat'd a path that never exists, found no `SESSION.md`, and silently emitted no warning — on **every** macOS and Linux session since the feature shipped. (Windows/Git-Bash was unaffected: that branch builds the slug separately.)
+- **`date -d` is GNU-only, so the staleness timestamp parsed as 0.** Even with the slug fixed, `date -d "$last_updated"` fails on BSD `date` (`illegal option -- d`), yielding `last_epoch=0`, which the guard `[[ "$last_epoch" -gt 0 ]]` then skipped. Added a `to_epoch()` helper that tries `gdate -d` → `date -d` → BSD `date -j -u -f` (`-u` matters: the marker is UTC, and parsing it as local time skews the age by the offset). `coreutils` is no longer a requirement.
+- **`/memstat` PROCESSES crashed on macOS: `syntax error: operand expected`.** `bin/memstat.sh` asked for `ps -eo pid,etimes,rss,command`, but `etimes` is a procps extension BSD `ps` doesn't have — and macOS `ps` drops an unknown keyword *silently* instead of erroring, shifting every column left so a command path (`/bin/zsh`) landed in `$rss` and `$(( rss / 1024 ))` aborted. Now probes for `etimes` support, falls back to `etime` with an `[[DD-]HH:]MM:SS` → seconds parser, and validates `pid`/`rss` are numeric before any arithmetic.
+- **`/memstat` INDEX and HEALTH always read "unavailable" on macOS.** `get_qmd_status()` wrapped the call in GNU `timeout`, which macOS doesn't ship; the command simply wasn't found, so `qmd status` output was always empty and HEALTH reported "index status unknown" even on a healthy index. Added a `run_timeout()` shim: `timeout` → `gtimeout` → run bare.
+- **`/memstat` ACTIVITY showed nonsense log ages.** `stat -c %Y` is GNU syntax; on BSD it errors and the `|| echo 0` fallback made every log look like it was last touched at the epoch. Added a `file_mtime()` shim (`stat -c %Y` → `stat -f %m`).
+
+**Docs**
+- `CLAUDE.md`, `INSTALL.md`, `README.ru.md`: the slug rule was documented Windows-only, which is what the buggy Unix branch was written against. Both platforms are now spelled out, with `ls ~/.claude/projects/` named as the authority.
+- `INSTALL.md`: dropped the `brew install coreutils` requirement and rewrote the two stale troubleshooting entries.
+
 ## v6.2.4 — 2026-05-28 — Cross-platform portability (installer ships what's actually in the tree)
 
 **Fixed**

@@ -92,7 +92,7 @@
 ### L1 запасной (`~/.claude/projects/<slug>/memory/project.md`)
 
 - **Когда использовать:** проект без репозитория, или где in-repo L1 неуместен (проприетарный, соло-эксперименты)
-- **Slug** вычисляется из cwd: `C:\dev\foo` → `C--dev-foo`
+- **Slug** вычисляется из cwd. Windows/Git-Bash: `C:\dev\foo` → `C--dev-foo`. macOS/Linux: `/Users/me/dev/foo` → `-Users-me-dev-foo` (каждый `/` → `-`, **включая ведущий**). Сверяться с `ls ~/.claude/projects/`
 
 ### L2 — Сессия (`~/.claude/projects/<slug>/memory/SESSION.md`)
 
