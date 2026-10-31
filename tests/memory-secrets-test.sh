@@ -108,5 +108,6 @@ ok "no allow: secret store" "$(dec Read "$(J file_path "$T/store/gh-token")")" n
 ok "no allow: Bash" "$(dec Bash "$(J command 'echo ok')")" none
 ok "guard fails open on bad JSON" "$(echo 'not json' | ms guard 2>/dev/null; echo $?)" 0
 
+ok "guard catches an appending redirect" "$(g Bash "$(J command "echo $ANT >> /r/SESSION.md")")" 2
 echo; [[ $fail -eq 0 ]] && echo "all $n passed" || echo "FAILED"
 exit $fail

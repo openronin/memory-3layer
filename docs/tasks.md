@@ -1,6 +1,6 @@
 # Task journals and CORE.md
 
-Status: design for an experiment on the `feat/tasks-journal` branch. Nothing here is implemented yet.
+Status: an experiment on the `feat/tasks-journal` branch.
 
 ## Why
 
@@ -22,10 +22,10 @@ The split:
     projects/<key>/
       CORE.md                        replaces SESSION.md
       CORE.archive.YYYY-MM.md        parts moved out of CORE.md, search only
-      tasks/<slug>.md                active and blocked tasks
-      tasks/archive/YYYY-MM/<slug>.md  closed tasks, complete, search only
+      _tasks/<slug>.md               active and blocked tasks
+      _tasks/archive/YYYY-MM/<slug>.md  closed tasks, complete, search only
 
-`SESSION.archive*` files stay where they are, and search still finds them.
+`SESSION.archive*` files stay where they are, and search still finds them. The directory is `_tasks` because routing works from the path, and a repository can well be called `tasks`.
 
 ## Journal format
 
@@ -58,11 +58,11 @@ Each write takes a lock, scans the body for secrets, and refuses the whole recor
 
 The session id comes from `CLAUDE_CODE_SESSION_ID`, with `--session` for harnesses that don't set one. Bindings live in `$STATE_DIR`, since they belong to one machine.
 
-The guard blocks direct writes to `tasks/`, including shell redirects. A mistake is corrected with a new record. The one exception is a `task redact` command for a secret that got through.
+The guard blocks direct writes to `_tasks/`, including shell redirects. A mistake is corrected with a new record. The one exception is a `task redact` command for a secret that got through.
 
 ## Closing a task
 
-`task close` needs the result and moves the journal, complete, to `tasks/archive/`. Before closing, the agent moves what must outlive the task into `CORE.md`. There are no separate stubs: the recent list is computed from the archive's `close` records, so nothing else grows.
+`task close` needs the result and moves the journal, complete, to `_tasks/archive/`. Before closing, the agent moves what must outlive the task into `CORE.md`. There are no separate stubs: the recent list is computed from the archive's `close` records, so nothing else grows.
 
 ## What a session gets
 
@@ -90,8 +90,8 @@ Size warnings on `CORE.md` fire at 20 KB and 40 KB, half of those on `SESSION.md
 
 | File | Layer |
 |---|---|
-| `CORE.md`, `tasks/*.md` | `session` |
-| `CORE.archive*`, `tasks/archive/**` | `archive` |
+| `CORE.md`, `_tasks/*.md` | `session` |
+| `CORE.archive*`, `_tasks/archive/**` | `archive` |
 
 The layer keys in `storage.conf` and `routing.conf` keep their names: they name a layer, not a file.
 
@@ -99,13 +99,13 @@ Conflicts in a journal don't use "newer wins", which would lose records. Both si
 
 ## Migration
 
-`migrate` renames `SESSION.md` to `CORE.md` and adds an empty `# Brief`. The agent moves active work into tasks by hand: nothing can tell a task from a note automatically. The client keeps reading `SESSION.md` for a project without `CORE.md`, because machines update at different times.
+`memory-3layer core init` renames this project's `SESSION.md` to `CORE.md` and adds an empty `# Brief`. The agent moves active work into tasks by hand: nothing can tell a task from a note automatically. The client keeps reading `SESSION.md` for a project without `CORE.md`, so projects move one at a time.
 
 ## The experiment
 
 The stable plugin stays published and unchanged, and no release tag is made from this branch.
 
-- **Plugin.** Version `7.2.0-dev`, built by `tools/package.sh` from the branch into a local directory and installed from a local marketplace. Only one of the two can be enabled, or hooks run twice. Going back means disabling the dev plugin and enabling the stable one.
+- **Plugin.** Version `7.2.0-dev`, built by `tools/package.sh <harness> <dir> --dev` from the branch into a local directory and installed from a local marketplace. Only one of the two can be enabled, or hooks run twice. Going back means disabling the dev plugin and enabling the stable one.
 - **Data.** Only this repository's project uses tasks and `CORE.md`, moved by hand. Other projects keep `SESSION.md`, read as before. `migrate` isn't run on real data until the experiment ends.
 
 ## What decides it
@@ -122,3 +122,4 @@ After two weeks of real work on this repository:
 - Verbatim recent turns: a hook would do this mechanically, but that bypasses "the agent writes the memory". Left out of the first version; `CORE.md` and journals have to show whether they're missed.
 - Search over tasks and archives: a separate review after the first version. Journals and archives are plain markdown, so qmd indexes them as they are.
 - Codex: session id and hook behaviour are unverified.
+- A task closed on one machine while another keeps logging to it comes back as active, with the archive beside it. To be seen whether this happens in practice.

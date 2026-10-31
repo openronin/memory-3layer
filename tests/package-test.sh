@@ -30,6 +30,11 @@ ok "hook answers from the package" "$(printf '%s' "$out" | python3 -c 'import js
 case "$out" in *"$P/bin/memory-3layer"*) r=y ;; *) r=n ;; esac; ok "context names the client" $r y
 ok "guard runs from the package" "$(echo '{"tool_name":"Read","tool_input":{"file_path":"/etc/hostname"}}' | HOME="$T/h" bash "$P/bin/memory-3layer" guard >/dev/null; echo $?)" 0
 ok "importer is found" "$(HOME="$T/h" bash "$P/bin/memory-3layer" import claude-code >/dev/null 2>&1; echo $?)" 0
+# a dev build stands beside the published marketplace
+D=$T/d; "$ROOT/tools/package.sh" claude-code "$D" --dev >/dev/null; ok "dev: builds" $? 0
+ok "dev: marketplace of its own" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["name"])' "$D/.claude-plugin/marketplace.json")" memory-3layer-dev
+ok "dev: plugin keeps its name" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plugins"][0]["name"])' "$D/.claude-plugin/marketplace.json")" memory-3layer
+ok "ships the task script" "$(test -x "$P/bin/memory-tasks.sh"; echo $?)" 0
 # codex package
 Q=$T/q; "$ROOT/tools/package.sh" codex "$Q" >/dev/null; ok "codex: builds" $? 0
 for f in .codex-plugin/plugin.json .agents/plugins/marketplace.json hooks/hooks.json bin/memory-3layer scripts/session-start.sh skills/protocol/SKILL.md; do

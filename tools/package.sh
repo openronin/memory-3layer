@@ -4,7 +4,7 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-usage() { echo "usage: tools/package.sh <claude-code|codex> <output directory>" >&2; exit 2; }
+usage() { echo "usage: tools/package.sh <claude-code|codex> <output directory> [--dev]" >&2; exit 2; }
 
 name="${1:-}"; out="${2:-}"
 [ -n "$name" ] && [ -n "$out" ] || usage
@@ -73,6 +73,13 @@ H
 # the package is installed by a plain git clone: with core.autocrlf=true the client would arrive
 # with CRLF and fail on "bash\r", so the package repository pins LF itself
 printf '* text=auto eol=lf\n' > "$out/.gitattributes"
+
+# --dev: a marketplace of its own, so a build from a branch can stand beside the published one.
+if [ "${3:-}" = --dev ]; then
+  for m in "$out/.claude-plugin/marketplace.json" "$out/.agents/plugins/marketplace.json"; do
+    [ -f "$m" ] && sed -i '0,/"name": "memory-3layer"/s//"name": "memory-3layer-dev"/' "$m"
+  done
+fi
 
 version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$out/$manifest" | head -1)
 [ -n "$version" ] || { echo "no version in $manifest" >&2; exit 1; }

@@ -333,5 +333,45 @@ ok "session hook still answers in JSON" "$(printf '%s' "$out" | python3 -c 'impo
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do git -C "$V" cat-file -e main:$K/project.md 2>/dev/null && break; sleep 0.3; done
 ok "session end pushes in the background" "$(has "$V" "$K/project.md")" 0
 
+# --- task journals and CORE.md: routing and merging ---
+JS=$(bare journals); JK=projects/github.com/j/r
+mkdir -p "$T/ja" "$T/jb"
+for m in ja jb; do mkdir -p "$(dirname "$(conf $m)")"; printf 'default = %s\nsession = none\n' "$JS" > "$(conf $m)"; done
+mk ja "$JK/CORE.md" "core"
+mk ja "$JK/_tasks/t.md" "x"
+mk ja "$JK/_tasks/archive/2026-01/o.md" "x"
+mk ja "$JK/CORE.archive.2026-01.md" "x"
+mk ja "$JK/project.md" "facts"
+on ja sync --quiet
+J=$T/jc; git clone -q "$JS" "$J" 2>/dev/null
+ok "routing: project.md goes" "$(test -e "$J/$JK/project.md"; echo $?)" 0
+ok "routing: session = none holds CORE.md" "$(test -e "$J/$JK/CORE.md"; echo $?)" 1
+ok "routing: session = none holds a journal" "$(test -e "$J/$JK/_tasks/t.md"; echo $?)" 1
+ok "routing: session = none holds the archives too" "$(test -e "$J/$JK/_tasks/archive/2026-01/o.md"; echo $?)" 1
+ok "routing: no stray project key" "$(git -C "$J" ls-files | grep -c '_tasks')" 0
+# a repo called tasks keeps its own key
+for m in ja jb; do printf 'default = %s\n' "$JS" > "$(conf $m)"; done
+mk ja "projects/github.com/j/tasks/project.md" "facts"
+rm -f "$(data ja)/$JK/_tasks/t.md"
+rec() { printf '## %s %s s:x\n%s\n\n' "$1" "$2" "$3"; }
+{ rec 2026-01-01T00:00:00Z-aaaa open goal; } > "$(data ja)/$JK/_tasks/m.md"
+on ja sync --quiet; on jb sync --quiet
+ok "a repo called tasks keeps its key" "$(exists jb "projects/github.com/j/tasks/project.md")" 0
+ok "journal reaches the other machine" "$(exists jb "$JK/_tasks/m.md")" 0
+ok "archive reaches the other machine" "$(exists jb "$JK/_tasks/archive/2026-01/o.md")" 0
+{ rec 2026-01-01T00:00:01Z-bbbb note "from a"; } >> "$(data ja)/$JK/_tasks/m.md"
+{ rec 2026-01-01T00:00:02Z-cccc next "from b"; } >> "$(data jb)/$JK/_tasks/m.md"
+on ja sync --quiet; on jb sync --quiet; on ja sync --quiet
+ok "merge: both machines agree" "$(cmp -s "$(data ja)/$JK/_tasks/m.md" "$(data jb)/$JK/_tasks/m.md"; echo $?)" 0
+ok "merge: no record lost" "$(grep -c '^## ' "$(data jb)/$JK/_tasks/m.md")" 3
+ok "merge: in order of id" "$(grep '^## ' "$(data jb)/$JK/_tasks/m.md" | cut -d' ' -f3 | paste -sd, -)" "open,note,next"
+ok "merge: no conflict file" "$(find "$(data jb)/$JK" -path '*superseded*' | wc -l | tr -d ' ')" 0
+ok "merge: no markers" "$(grep -c '<<<<' "$(data jb)/$JK/_tasks/m.md")" 0
+# first sync of a machine that already has its own copy
+mkdir -p "$T/jd"; mkdir -p "$(dirname "$(conf jd)")"; printf 'default = %s\n' "$JS" > "$(conf jd)"
+mk jd "$JK/_tasks/m.md" "$(rec 2026-01-01T00:00:03Z-dddd note 'from d')"
+on jd sync --quiet
+ok "first sync joins a journal" "$(grep -c '^## ' "$(data jd)/$JK/_tasks/m.md")" 4
+
 echo; [[ $fail -eq 0 ]] && echo "all $n passed" || echo "FAILED"
 exit $fail

@@ -95,6 +95,19 @@ Do this even if a SessionStart hook also fires — idempotent.
 
 10. **Harness memory is a source, not a store.** `memory-3layer import <harness>` shows what a harness has saved in its own memory, and `--apply` copies it to `<home>/projects/<key>/imported/<harness>/`. The copy is unreviewed: verify a note before relying on it, and move what still holds into `project.md` or the repo docs under rule 6.
 
+## Projects on task journals
+
+A project with `<home>/projects/<key>/CORE.md` or `_tasks/` works differently from the L2 rules above. The session context says what it needs. There is no `SESSION.md`.
+
+- **Tasks.** Work with more than one step, or that can outlive this session, is a task: `memory-3layer task open <name>`, goal on stdin. Keep its next step current with `task log <name> next`; `note`, `decision` and `blocker` work the same way. Start with `task resume <name>` when continuing one. A blocker holds until the next `next`.
+- **Journals are append-only**, written only through the client. A mistake is corrected with a new record. `task redact` is for a secret that got through.
+- **Closing.** Move what must outlive the task into `CORE.md`, then `task close <name>` with the result on stdin. The journal goes to the archive whole.
+- **`CORE.md`** is yours: live extracts worth keeping, written without being asked, rewritten when they go stale. Permanent memory (`IDENTITY.md`, `project.md`, repo docs) still takes the user's word.
+- **`# Brief`** in `CORE.md` is injected into every session, up to 5 KB: only what would make an agent go wrong without it. It runs to the next first-level heading.
+- **Too large.** When warned, rewrite what is stale and move the rest out: `memory-3layer core stash <title>`, text on stdin, then leave the printed line in its place. Archives are found through `/recall`.
+
+Design: `docs/tasks.md` in the memory-3layer repository.
+
 ## Workflow patterns
 
 ### Pre-compact checkpoint

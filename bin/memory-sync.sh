@@ -119,13 +119,15 @@ route_path() {
   esac
   p=${p#projects/}; name=${p##*/}
   case "$p" in
+    */_tasks/archive/*) route "${p%%/_tasks/*}" archive; return ;;
+    */_tasks/*) route "${p%%/_tasks/*}" session; return ;;
     */imported/*) key=${p%%/imported/*} ;;
     */superseded/*) key=${p%%/superseded/*} ;;
     *) key=${p%/*} ;;
   esac
   case "$name" in
-    SESSION.md) layer=session ;;
-    SESSION.*) layer=archive ;;
+    SESSION.md|CORE.md) layer=session ;;
+    SESSION.*|CORE.*) layer=archive ;;
     *) layer=project ;;
   esac
   route "$key" "$layer"
@@ -169,6 +171,19 @@ loser_path() {
   local p=$1 host=$2 dir=.
   [[ "$p" == */* ]] && dir=${p%/*}
   printf '%s/superseded/conflict-%s/%s' "$dir" "$host" "${p##*/}"
+}
+
+is_journal() { [[ "$1" == */_tasks/*.md && "$1" != */superseded/* ]]; }
+
+merge_journals() {
+  # merge_journals <a> <b>: a journal is a set of records, so a conflict means joining
+  # them in order of id. "Newer wins" would lose the other machine's work.
+  awk 'function out() { if (rec != "") print id "\t" rec; rec = "" }
+    FNR == 1 { out(); id = "" }
+    /^## [0-9-]+T[0-9:]+Z-[0-9a-f]+ [a-z]+ s:[^ ]+$/ { out(); id = $2; rec = $0; next }
+    id != "" { rec = rec "\001" $0 }
+    END { out() }' "$1" "$2" \
+    | LC_ALL=C sort -t "$(printf '\t')" -k1,1 -u | cut -f2- | tr '\001' '\n'
 }
 
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
@@ -261,6 +276,10 @@ copy_out() {
       printf 'SECRET, stays local: %s\n' "$f"
       continue
     fi
+    if [[ "$first" == 1 && -f "$c" ]] && is_journal "$p"; then
+      merge_journals "$f" "$c" > "$c.merged" && mv "$c.merged" "$c"
+      continue
+    fi
     if [[ "$first" == 1 && -f "$c" ]]; then
       loser=$(loser_path "$p" "$HOST")
       if theirs_is_newer "$f" "$c" "$(mtime "$f")" "$(mtime "$c")"; then
@@ -323,6 +342,8 @@ resolve_conflicts() {
       cp "$ours" "$CLONE/$p"
     elif ! g cat-file -e ":2:$p" 2>/dev/null; then
       mkdir -p "$(dirname "$CLONE/$p")"; cp "$theirs" "$CLONE/$p"
+    elif is_journal "$p"; then
+      merge_journals "$ours" "$theirs" > "$CLONE/$p"
     elif theirs_is_newer "$ours" "$theirs" "$(g log -1 --format=%ct HEAD -- "$p")" "$(g log -1 --format=%ct "origin/$BRANCH" -- "$p")"; then
       mkdir -p "$(dirname "$CLONE/$(loser_path "$p" "$HOST")")"
       cp "$ours" "$CLONE/$(loser_path "$p" "$HOST")"

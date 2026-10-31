@@ -168,24 +168,47 @@ is_memory_path() {
     "$MEMORY_HOME"/*|"~${MEMORY_HOME#"$HOME"}"/*) return 0 ;;
   esac
   case "$1" in
-    */.claude/memory/*|*/.claude/projects/*/memory/*|*/.claude-docs/*|*/CLAUDE.md|*/AGENTS.md|*/IDENTITY.md|*/SESSION*.md) return 0 ;;
+    */.claude/memory/*|*/.claude/projects/*/memory/*|*/.claude-docs/*|*/CLAUDE.md|*/AGENTS.md|*/IDENTITY.md|*/SESSION*.md|*/CORE*.md) return 0 ;;
   esac
+  return 1
+}
+
+is_journal_path() {
+  # A task journal has one writer, the client, which owns its ids and times.
+  case "$1" in
+    "$MEMORY_HOME"/projects/*/_tasks/*|"~${MEMORY_HOME#"$HOME"}"/projects/*/_tasks/*) return 0 ;;
+  esac
+  return 1
+}
+
+JOURNAL_BLOCK='BLOCKED: a task journal is written only through the client: memory-3layer task log <name> <type>, with the text on stdin. A mistake is corrected with a new record.'
+
+bash_writes_journal() {
+  # Moving or deleting a journal counts too: closing has to leave a record.
+  local text=$1 word line
+  bash_writes_memory "$text" is_journal_path && return 0
+  while IFS= read -r line; do
+    for word in $line; do
+      word=${word//[\"\']/}
+      is_journal_path "$word" && return 0
+    done
+  done < <(printf '%s\n' "$text" | grep -E '(^|[[:space:];&|])(mv|rm|cp)[[:space:]]' || true)
   return 1
 }
 
 bash_writes_memory() {
   # True when a command writes to a memory file: redirect, tee or sed -i. Merely
   # mentioning a memory path, as a test fixture does, is not a write.
-  local text=$1 word line
+  local text=$1 check=${2:-is_memory_path} word line
   while IFS= read -r word; do
-    word=${word#*>}; word=${word#tee}; word=${word# -a}
+    word=${word##*>}; word=${word#tee}; word=${word# -a}
     word=$(printf '%s' "$word" | sed -E "s/^[[:space:]]+//; s/[\"']//g")
-    is_memory_path "$word" && return 0
+    "$check" "$word" && return 0
   done < <(printf '%s\n' "$text" | grep -oE "(>>?|tee( -a)?)[[:space:]]*[\"']?[^[:space:]\"'|;&]+" || true)
   while IFS= read -r line; do
     for word in $line; do
       word=${word//[\"\']/}
-      is_memory_path "$word" && return 0
+      "$check" "$word" && return 0
     done
   done < <(printf '%s\n' "$text" | grep -E '(^|[[:space:];&|])sed[[:space:]]+-i' || true)
   return 1
@@ -230,6 +253,17 @@ print(t); print(real); print(1 if inside else 0); sys.stdout.write(text)
   path=$(printf '%s\n' "$parsed" | sed -n 2p)
   inside=$(printf '%s\n' "$parsed" | sed -n 3p)
   text=$(printf '%s\n' "$parsed" | sed 1,3d)
+  case "$tool" in
+    Write|Edit|MultiEdit)
+      if is_journal_path "$path"; then printf '%s\n' "$JOURNAL_BLOCK" >&2; return 2; fi ;;
+    Bash)
+      if bash_writes_journal "$text"; then printf '%s\n' "$JOURNAL_BLOCK" >&2; return 2; fi ;;
+    Patch)
+      local j
+      while IFS= read -r j; do
+        if is_journal_path "$j"; then printf '%s\n' "$JOURNAL_BLOCK" >&2; return 2; fi
+      done < <(printf '%s\n' "$path" | tr '\t' '\n') ;;
+  esac
   case "$tool" in
     Bash) bash_writes_memory "$text" || return 0 ;;
     Patch)

@@ -160,9 +160,49 @@ sync_notes() {
   fi
 }
 
+tasks() {
+  MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" \
+    MEMORY_3LAYER_PROJECT="$(project_dir)" MEMORY_3LAYER_KEY="$(project_key)" \
+    TASK_STALE_DAYS="${TASK_STALE_DAYS:-7}" CORE_BRIEF_BYTES="${CORE_BRIEF_BYTES:-5000}" \
+    CORE_SOFT_BYTES="${CORE_SOFT_BYTES:-20000}" CORE_HARD_BYTES="${CORE_HARD_BYTES:-40000}" \
+    bash "$SELF_DIR/memory-tasks.sh" "$@"
+}
+
+context_core() {
+  # A project on task journals: everything that matters is in the text itself, because
+  # a request to read a file can be skipped and injected context can't.
+  local pd=$1 id=$2 session=$3
+  cat <<TEXT
+MEMORY-3LAYER ACTIVE. Anything that must survive a new machine or a different agent goes here, not into this harness's own memory, if it has one.
+
+Project: $(project_key)
+TEXT
+  tasks ${session:+--session "$session"} context
+  if [[ -f "$id" ]]; then printf '\nIdentity (%s):\n' "$id"; cat "$id"; fi
+  [[ -f "$pd/project.md" ]] && printf '\nProject notes: %s. Read them before your first response.\n' "$pd/project.md"
+  cat <<TEXT
+
+Client: $SELF_DIR/memory-3layer. Rules: the protocol skill, or CLAUDE.md.
+
+Work with more than one step, or that can outlive this session, is a task. Pass the text on stdin:
+  memory-3layer task open <name> | task resume <name> | task show <name> [--log]
+  memory-3layer task log <name> note|decision|next|blocker | task close <name>
+Journals are written only through these commands. Keep next current as you work.
+$pd/CORE.md is yours to edit freely: live extracts worth keeping, with the most important in its # Brief block. Before closing a task, move what must outlive it there. Never write a secret value into memory; write secret://<name>.
+TEXT
+  if compgen -G "$pd/imported/*/*.md" >/dev/null; then
+    printf '\nNotes imported from a harness are in %s/imported/. They are not reviewed: read them when relevant, verify them, and propose moving what still holds into project.md or the repo docs.\n' "$pd"
+  fi
+  sync_notes "$pd"
+}
+
 context_text() {
-  local pd id
+  local pd id session=${1:-}
   pd=$(project_dir); id=$(identity_file)
+  if [[ -f "$pd/CORE.md" || -d "$pd/_tasks" ]]; then
+    context_core "$pd" "$id" "$session"
+    return
+  fi
   cat <<TEXT
 MEMORY-3LAYER ACTIVE. Anything that must survive a new machine or a different agent goes here, not into this harness's own memory, if it has one.
 
@@ -184,15 +224,16 @@ TEXT
 
 cmd_context() {
   # With --hook-format, or JSON naming a hook event on stdin, answer as a hook.
-  local format=text event=SessionStart input=""
+  local format=text event=SessionStart input="" session=""
   [[ "${1:-}" == --hook-format ]] && format=${2:-text}
   if [[ ! -t 0 ]]; then
     input=$(timeout 1 cat 2>/dev/null || true)
     if [[ "$input" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"([A-Za-z]+)\" ]]; then
       event=${BASH_REMATCH[1]}; [[ "$format" == text ]] && format=hook
     fi
+    [[ "$input" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]+)\" ]] && session=${BASH_REMATCH[1]}
   fi
-  local text; text=$(context_text)
+  local text; text=$(context_text "$session")
   if [[ "$format" == hook ]]; then
     printf '{"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' "$event" "$(json_escape "$text")"
   else
@@ -392,9 +433,9 @@ cmd_unpin() {
 cmd_projects() {
   # Keys that have memory. A key is also the repo's address, for cloning on a new machine.
   [[ -d "$HOME_DIR/projects" ]] || return 0
-  find "$HOME_DIR/projects" -type f \( -name 'SESSION.md' -o -name 'project.md' -o -path '*/imported/*' \) \
+  find "$HOME_DIR/projects" -type f \( -name 'SESSION.md' -o -name 'CORE.md' -o -name 'project.md' -o -path '*/imported/*' -o -path '*/_tasks/*' \) \
     | grep -vE '/superseded/' \
-    | sed "s#^$HOME_DIR/projects/##" | sed -E -e 's#/imported/.*##' -e t -e 's#/[^/]+$##' | sort -u
+    | sed "s#^$HOME_DIR/projects/##" | sed -E -e 's#/imported/.*##' -e t -e 's#/_tasks/.*##' -e t -e 's#/[^/]+$##' | sort -u
 }
 
 cmd_search() {
@@ -453,6 +494,9 @@ memory-3layer — agent memory that belongs to no harness
   refresh [--debounce]                          rebuild the search index
   guard                                         PreToolUse hook: block secrets, allow the data dir
   secret <command>                              local secret store: put, list, run, scan...
+  task open|log|resume|show|close|redact        task journals: docs/tasks.md
+  state                                         active and recently closed tasks
+  core init | stash <title> | brief             CORE.md: put a project on it, archive a part, see the brief
 USAGE
 }
 
@@ -469,6 +513,7 @@ case "$cmd" in
       *) die "unknown path '$1'" ;;
     esac ;;
   key) project_key "${1:-$PWD}"; echo ;;
+  task|core|state) tasks "$cmd" "$@" ;;
   context) cmd_context "$@" ;;
   sync) MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" exec bash "$SELF_DIR/memory-sync.sh" "$@" ;;
   migrate) cmd_migrate "$@" ;;
