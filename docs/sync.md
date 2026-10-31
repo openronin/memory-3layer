@@ -1,6 +1,14 @@
 # Sync between machines
 
-Status: implemented in `bin/memory-sync.sh`; commands are under `memory-3layer sync`.
+Memory syncs through private git repositories you choose, so it can follow you to another machine while work data stays in a work storage. Nothing is sent until a storage is set.
+
+    memory-3layer sync init <git address>     # set the default storage
+    memory-3layer sync check                  # test access
+    memory-3layer sync                        # sync now; hooks do this on their own
+    memory-3layer sync status                 # state of each storage
+    memory-3layer sync route [key]            # where a project's data goes
+
+The code is in `bin/memory-sync.sh`.
 
 ## Which storage holds what
 
@@ -31,9 +39,9 @@ Other rules:
 
 ## Configuration format
 
-Same grammar as xchg: `key = value`, `[section]`, `# comment`.
+`key = value`, `[section]`, `# comment`.
 
-    default = git@xchg.app:someone/memory.git
+    default = git@github.com:someone/memory.git
     archive = none
 
     [project gitlab.example.com/team/app]

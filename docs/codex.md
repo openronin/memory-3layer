@@ -1,6 +1,6 @@
 # Codex CLI
 
-Status: built from the Codex documentation and the xchg package layout. Not yet run on a real Codex. The list below is what to check.
+Status: built from the Codex documentation. Not yet run on a real Codex. The list below is what to check.
 
 ## Install
 

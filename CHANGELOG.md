@@ -4,6 +4,7 @@
 
 - Codex CLI plugin, built from its documentation. Not yet run on a real Codex: see `docs/codex.md`.
 - The guard reads `apply_patch` patches.
+- Documentation rewritten for the current layout. Upgrade steps are in `docs/migration.md`.
 
 ## v7.0.0 — 2026-10-31 — Harness-independent memory, sync, plugin
 

@@ -1,143 +1,107 @@
-# claude-memory-3layer
+# memory-3layer
 
-> Hand-curated, in-repo memory for Claude Code. Three layers, deliberate placement, zero auto-capture. With hybrid retrieval (qmd) and on-demand symbol map (ctags). 100% local.
+Memory for coding agents that lives in plain markdown files, outside any agent. Move to a new machine or another agent, connect your storage, and the work continues where it stopped.
 
-A replacement for Claude Code's default memory system, battle-tested on ~15 real projects (PHP/mpcmf, Python, TS, reverse-engineering, multi-machine setups).
+[Русская версия](README.ru.md)
+
+## Why
+
+An agent loses its context on every compaction, new session and new machine. A harness's built-in memory stays with that harness on that machine. This tool keeps the memory in files you can read, diff and sync with git.
+
+Nothing is captured automatically. The agent keeps its working state as it goes, and a fact becomes long-term memory only when you say so.
+
+## How it works
+
+Each fact goes in the layer that matches how long it lives and who needs it:
+
+| Layer | File | Loaded | Holds |
+|---|---|---|---|
+| L0 | `<data>/identity/IDENTITY.md` | every session | who you are, hard preferences; 25 lines at most |
+| L1a | `<repo>/CLAUDE.md` | every session in the repo | commands, rules, an index of the docs |
+| L1b | `<repo>/.claude-docs/*.md` | on demand | architecture, conventions, `gotchas.md` |
+| L1 fallback | `<data>/projects/<key>/project.md` | every session | notes for a project with no suitable repo |
+| L2 | `<data>/projects/<key>/SESSION.md` | every session, after every compaction | goal, state, decisions, recent turns |
+| L2 archive | `<data>/projects/<key>/SESSION.archive*.md` | only through search | closed work moved out of L2 |
+
+`<data>` is `~/.local/share/memory-3layer`. L1a and L1b are committed with the code, so teammates and server agents see them. The rule for choosing: *would a server agent at midnight, with no memory and no human, need this?* If yes, it goes in the repo.
+
+`<key>` is the project's git remote, such as `github.com/owner/repo`, so a project has the same memory on every machine, worktree and branch. A project with no remote uses its path under `$HOME`, or a key you set with `memory-3layer pin`.
+
+Hooks do the mechanical part:
+
+| Event | What happens |
+|---|---|
+| Session start | Pull from storages, tell the agent what to read, warn if `SESSION.md` is stale or too large |
+| Before a tool runs | Block a secret from being written to memory, allow writes to the memory directory |
+| Before compaction | Remind the agent to save its state, push in the background |
+| Session end | Push in the background |
+
+Secret values never enter memory. Memory holds `secret://<name>`, and the value stays in `~/.local/share/memory-3layer-secrets` on that machine, protected by file permissions, not encrypted.
+
+The full rules the agent follows are in [CLAUDE.md](CLAUDE.md).
 
 ## Install
 
-As a Claude Code plugin:
+Claude Code:
 
 ```
 /plugin marketplace add openronin/memory-3layer-claude-code
 /plugin install memory-3layer@memory-3layer
 ```
 
-For Codex CLI, not yet run on a real Codex, see [docs/codex.md](docs/codex.md).
+Restart the session. Nothing leaves the machine until you set a storage.
 
-Restart the session. Nothing leaves the machine until you set a storage: see [docs/sync.md](docs/sync.md).
+Other routes and optional tools: [INSTALL.md](INSTALL.md). Codex CLI, not yet run on a real Codex: [docs/codex.md](docs/codex.md). Coming from an older version: [docs/migration.md](docs/migration.md).
 
-Coming from an older version: `memory-3layer migrate claude-code` shows a plan, `--apply` copies. Sources are left in place.
+## Use
 
-## Why
+In a session you mostly talk to the agent: "запомни" or "remember" promotes a fact to long-term memory.
 
-After trying the popular options:
-- **[CodeGraph](https://github.com/colbymchenry/codegraph)** — code knowledge graph. Live MCP-transport bug at the time of evaluation; correctness bug in module-qualified symbol lookup (silently picks random collisions).
-- **[AgentMemory](https://github.com/rohitg00/agentmemory)** — persistent memory via MCP. Issue #522: *"Sessions never created and silent data loss"*. Philosophically opposite to what a coding agent needs (auto-capture vector blob vs explicit curated knowledge).
+| Command | What it does |
+|---|---|
+| `/recall <query>` | Search memory across projects |
+| `/codemap def\|callers\|callees\|outline <symbol>` | Symbol map of the current repo |
+| `/memory status\|auto on\|auto off\|refresh\|rotate` | Memory controls; `rotate` moves closed work to the archive |
+| `/memstat` | Search processes and index progress |
 
-This system is what crystallized as the alternative: **what you write down, you own. What you don't write down, doesn't exist.** No vector blobs, no auto-capture, no daemons, no MCP servers. Just markdown + a tiny set of tools.
-
-## Design principle
-
-> *"Would a server agent at midnight, with no memory and no human, need this?"*
-> — **yes** → put it in the repo (git-tracked, travels with code)
-> — **no** → put it in account-local memory (`~/.claude/...`)
-
-Codebase facts go with the codebase. Personal preferences and per-task scratch stay account-local. Don't cross the wires.
-
-## Architecture — three layers, different decay rates
-
-| Layer | Path | Git? | Decay |
-|---|---|---|---|
-| **L0 Identity** | `~/.claude/memory/IDENTITY.md` | no | permanent (≤25 lines) |
-| **L1a Repo entry** | `<repo>/CLAUDE.md` | **yes** | per-project; thin, auto-loaded |
-| **L1b Repo docs** | `<repo>/.claude-docs/*.md` | **yes** | per-project; thick, lazy-loaded |
-| **L1 fallback** | `~/.claude/projects/<slug>/memory/project.md` | no | for repos where in-repo isn't appropriate |
-| **L2 Session** | `~/.claude/projects/<slug>/memory/SESSION.md` | no | per-task; bounded window, closed arcs rotate out |
-| **L2 Archive** | `~/.claude/projects/<slug>/memory/SESSION.archive[.YYYY-MM].md` | no | closed arcs, recall-only, never auto-loaded |
-
-`<repo>/CLAUDE.md` is loaded into every session by Claude Code automatically — keep it **thin**. Bulky knowledge lives in `<repo>/.claude-docs/*.md` and is read on demand via the doc index in `CLAUDE.md`.
-
-The killer move is **`<repo>/.claude-docs/gotchas.md`** — every non-obvious footgun goes here. *"Looks right but breaks"* / *"Looks wrong but is intentional"*. One paragraph each. Future sessions hit the same wall and benefit immediately.
-
-## Tools (all local, no daemons)
-
-### `/recall <query>` — hybrid memory search
-
-BM25 + GGUF embeddings + LLM rerank over all your memory files. Backed by [qmd](https://github.com/tobi/qmd) (Tobi Lütke).
-
-```
-/recall MongoDB legacy driver mpcmf
-/recall гочи WSL DNS IPv6
-/recall --here armenia weekly window     # scope to current project
-```
-
-### `/codemap def|callers|callees|outline <symbol>` — on-demand symbol map
-
-universal-ctags + ripgrep. Cache at `<repo>/.codemap.tags` (gitignore-able). Auto-rebuilds when source files are newer.
-
-```
-/codemap def LlmClient::chat
-/codemap callers AgentExecutor
-/codemap outline
-```
-
-### `/memory status | auto on|off | refresh | rotate` — protocol controls
-
-Default mode is **explicit-promotion** — cross-session memory only when the user says "remember"/"запомни". Toggle to auto-capture per-session if you want it. `rotate [--dry-run]` relocates closed L2 arcs into the recall-only archive (lossless) to keep `SESSION.md` within its size budget.
-
-## Hooks (enforce discipline)
-
-- **SessionStart** — injects protocol reminder; detects stale `SESSION.md` (>24h since last update → forces explicit *"continue or reset?"*) **and** oversized `SESSION.md` (soft/hard byte limits from `~/.claude/.memory-config` → nudge to `/memory rotate`). Also kicks a background `qmd update` (FTS only) debounced 6h.
-- **PreCompact** — reminds Claude to flush working state to `SESSION.md` before compaction wipes context. `SESSION.md` is the only artifact that survives compaction with full fidelity.
-
-## What's deliberately NOT in it
-
-- ✗ **Auto-capture** of arbitrary tool output into memory — that's exactly the failure mode `AgentMemory` documents in their open issues (silent data loss, runaway logs).
-- ✗ **MCP server with 50+ tools** — context-window tax in every request, whether you use those tools or not.
-- ✗ **Persistent code-graph daemon** with per-project SQLite — `/codemap` is on-demand instead. Re-scan in ~1s for medium repos.
-- ✗ **Vector blob** you can't `diff`. Memory is markdown you can read with your eyes.
-- ✗ **Cloud, OpenAI keys, embedding APIs** — qmd uses local GGUF models (embeddinggemma-300M, qwen3-reranker, qmd-query-expansion).
-
-## Quick start
-
-See [INSTALL.md](INSTALL.md) for full instructions across Windows / macOS / Linux. TL;DR:
+In Claude Code, plugin skills are named `/memory-3layer:recall` and so on. The client:
 
 ```bash
-# 1. Drop CLAUDE.md, hooks, commands, bin/, templates into ~/.claude/
-# 2. Merge settings.snippet.json into ~/.claude/settings.json
-# 3. Edit ~/.claude/memory/IDENTITY.md (≤25 lines, who you are)
-# 4. For retrieval tools (optional, recommended):
-winget install OpenJS.NodeJS.LTS UniversalCtags.Ctags BurntSushi.ripgrep.MSVC
-npm install -g @tobilu/qmd
-qmd collection add ~/.claude/memory --name claude-l0
-qmd collection add ~/.claude/projects --name claude-projects
-QMD_LLAMA_GPU=none qmd embed   # one-time, ~2GB of GGUF models download
+memory-3layer sync init <git address>   # set the default storage
+memory-3layer sync status               # state of each storage
+memory-3layer secret put <name>         # store a secret, then write secret://<name> in memory
+memory-3layer key                       # this project's key
+memory-3layer                           # all commands
 ```
 
-## Obsidian compatibility
+Syncing between machines, with separate storages for work and personal projects: [docs/sync.md](docs/sync.md).
 
-All memory files use YAML frontmatter with hierarchical tags (`memory/l0` / `memory/l1` / `memory/l2` / `memory/repo`). Open `~/.claude/` or any repo's root as an Obsidian vault — graph view, tag filtering, full-text search across all your projects.
-
-## Repo layout
+## Development
 
 ```
-CLAUDE.md                       — the memory protocol (replaces default; goes to ~/.claude/)
-INSTALL.md                      — install instructions, troubleshooting
-LICENSE                         — MIT
-CHANGELOG.md                    — version history
-memory/IDENTITY.md              — L0 template
-templates/repo/CLAUDE.md        — L1a template (thin in-repo entry)
-templates/repo/.claude-docs/*   — L1b templates (gotchas, architecture, conventions, index)
-templates/project.md.fallback.template — L1-fallback template (account-local)
-hooks/session-start.sh          — staleness + L2 size check + protocol injection + qmd auto-refresh
-hooks/pre-compact.sh            — pre-compact flush reminder
-commands/{recall,codemap,memory}.md — slash command definitions
-bin/{codemap,memstat}.sh        — symbol map + memory-subsystem dispatcher
-.memory-config.template         — optional runtime config (L2 size limits); installed to ~/.claude/.memory-config
-settings.snippet.json           — hooks block for ~/.claude/settings.json
+bin/memory-3layer     client: paths, keys, session context, migrate, import, search
+bin/memory-sync.sh    sync and routing
+bin/memory-secrets.sh secret store, scanner, write guard
+bin/codemap.sh        symbol map
+bin/memstat.sh        search process monitor
+hooks/                hook scripts, the same for every harness
+commands/             slash commands; the package turns them into skills
+CLAUDE.md             the protocol; the package turns it into the protocol skill
+harness/<name>/       manifests, hook wiring and the memory importer of one harness
+templates/, memory/   templates for L0, L1a, L1b and the L1 fallback
+tools/package.sh      builds a package for one harness
+tools/publish.sh      publishes a package to its repository
+install.sh            manual install into ~/.claude
 ```
+
+Tests, in bash, also run in CI:
+
+```bash
+for t in tests/*-test.sh; do bash "$t"; done
+```
+
+An annotated tag `vX.Y.Z` releases everything. The workflow runs the tests, publishes `memory-3layer-claude-code` and `memory-3layer-codex`, and creates a GitHub release from the tag's body. Package repositories are generated, so changes go here.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Use it, fork it, share it.
-
-## Acknowledgments
-
-- [qmd](https://github.com/tobi/qmd) by Tobi Lütke — the retrieval engine that made `/recall` trivial to build
-- [universal-ctags](https://github.com/universal-ctags/ctags) — symbol map backbone
-- The folks who built [CodeGraph](https://github.com/colbymchenry/codegraph) and [AgentMemory](https://github.com/rohitg00/agentmemory) — evaluating them clarified what this system needed to be *different*
-
-## Part of [openronin](https://github.com/openronin)
-
-A loose collection of self-hosted AI dev tooling. This protocol is compatible with any tool that runs Claude Code — interactive sessions, headless runs, including `openronin`'s GitHub-issue-driven agents.
+[MIT](LICENSE). Search is built on [qmd](https://github.com/tobi/qmd), the symbol map on [universal-ctags](https://github.com/universal-ctags/ctags).
