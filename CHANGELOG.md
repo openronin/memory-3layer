@@ -1,5 +1,10 @@
 # Changelog
 
+## v7.1.0 — 2026-10-31 — Codex package
+
+- Codex CLI plugin, built from its documentation. Not yet run on a real Codex: see `docs/codex.md`.
+- The guard reads `apply_patch` patches.
+
 ## v7.0.0 — 2026-10-31 — Harness-independent memory, sync, plugin
 
 - Data moves out of the harness to `~/.local/share/memory-3layer`, keyed by the git remote, not by the directory. `memory-3layer migrate` and `import` bring older data and native notes.

@@ -4,7 +4,7 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-usage() { echo "usage: tools/package.sh <claude-code> <output directory>" >&2; exit 2; }
+usage() { echo "usage: tools/package.sh <claude-code|codex> <output directory>" >&2; exit 2; }
 
 name="${1:-}"; out="${2:-}"
 [ -n "$name" ] && [ -n "$out" ] || usage
@@ -17,7 +17,25 @@ case "$name" in
 /plugin marketplace add openronin/memory-3layer-claude-code
 /plugin install memory-3layer@memory-3layer
 ```' ;;
+  codex) title="Codex CLI plugin"; manifest=".codex-plugin/plugin.json"
+    install='```bash
+codex plugin marketplace add openronin/memory-3layer-codex
+codex plugin add memory-3layer@memory-3layer
+```
+
+Then trust the hooks in `/hooks`, and allow writes to the memory directory: see
+[docs/codex.md](https://github.com/openronin/memory-3layer/blob/main/docs/codex.md). This package has not yet been run on a real Codex.' ;;
   *) usage ;;
+esac
+
+# How a skill reaches the client: only Claude Code puts a plugin's bin/ on PATH.
+case "$name" in
+  claude-code)
+    client='bash "$(command -v memory-3layer | xargs dirname)"/'
+    naming='Slash commands named below are skills of this plugin: `/recall` is `/memory-3layer:recall`, and so on.' ;;
+  codex)
+    client='bash <directory of the Client path in the session context>/'
+    naming='Slash commands named below are skills of this plugin: `/recall` is `$recall`, and so on. A `memory-3layer` command means the Client path in the session context.' ;;
 esac
 
 rm -rf "$out"; mkdir -p "$out"
@@ -36,17 +54,17 @@ mkdir -p "$out/scripts"; cp "$ROOT"/hooks/*.sh "$out/scripts/"; chmod +x "$out"/
 # An installed plugin has bin/ on PATH and calls its commands by name.
 for c in "$ROOT"/commands/*.md; do
   n=$(basename "$c" .md); mkdir -p "$out/skills/$n"
-  { printf -- '---\nname: %s\n' "$n"; sed '1d' "$c" | sed 's#bash ~/\.claude/bin/#bash "$(command -v memory-3layer | xargs dirname)"/#'; } > "$out/skills/$n/SKILL.md"
+  { printf -- '---\nname: %s\n' "$n"; sed '1d' "$c" | sed "s#bash ~/\.claude/bin/#$client#"; } > "$out/skills/$n/SKILL.md"
 done
 mkdir -p "$out/skills/protocol"
 {
-  cat <<'H'
+  cat <<H
 ---
 name: protocol
 description: The full memory-3layer protocol - which layer a fact belongs to, how to keep SESSION.md, rotation, promotion, secrets. Read it when deciding where to save something, when wrapping up a task, before compaction, or when a memory warning appears.
 ---
 
-Slash commands named below are skills of this plugin: `/recall` is `/memory-3layer:recall`, and so on. Templates are in the `templates/` directory of this plugin.
+$naming Templates are in the \`templates/\` directory of this plugin.
 
 H
   sed -E 's#~/\.claude/dist/memory-3layer/templates/#the plugin'"'"'s `templates/` directory, #g' "$ROOT/CLAUDE.md"

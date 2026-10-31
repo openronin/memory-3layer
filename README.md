@@ -13,6 +13,8 @@ As a Claude Code plugin:
 /plugin install memory-3layer@memory-3layer
 ```
 
+For Codex CLI, not yet run on a real Codex, see [docs/codex.md](docs/codex.md).
+
 Restart the session. Nothing leaves the machine until you set a storage: see [docs/sync.md](docs/sync.md).
 
 Coming from an older version: `memory-3layer migrate claude-code` shows a plan, `--apply` copies. Sources are left in place.

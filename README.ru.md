@@ -13,6 +13,8 @@
 /plugin install memory-3layer@memory-3layer
 ```
 
+Для Codex CLI, ещё не проверенного на настоящем Codex, см. [docs/codex.md](docs/codex.md).
+
 Перезапустите сессию. Пока не настроено хранилище, ничего не покидает машину: см. [docs/sync.md](docs/sync.md).
 
 Переход со старой версии: `memory-3layer migrate claude-code` показывает план, `--apply` копирует. Исходные файлы остаются на месте.

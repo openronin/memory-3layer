@@ -203,6 +203,18 @@ cmd_guard() {
 import json, os, sys
 d = json.load(sys.stdin); i = d.get("tool_input") or {}
 t = d.get("tool_name", "")
+patch = i.get("command", "") if isinstance(i.get("command"), str) else ""
+cwd = d.get("cwd") or os.getcwd()
+if t == "apply_patch" or patch.lstrip().startswith("*** Begin Patch"):
+    # Codex: the paths and the added lines of a patch.
+    t = "Patch"; files = []; added = []
+    for l in patch.splitlines():
+        for mark in ("*** Add File: ", "*** Update File: ", "*** Move to: "):
+            if l.startswith(mark):
+                files.append(os.path.realpath(os.path.join(cwd, os.path.expanduser(l[len(mark):].strip()))))
+        if l.startswith("+"): added.append(l[1:])
+    home = os.path.realpath(os.environ["M_HOME"])
+    print(t); print("\t".join(files)); print(0); sys.stdout.write("\n".join(added)); sys.exit()
 if t == "Write": text = i.get("content", "")
 elif t == "Edit": text = i.get("new_string", "")
 elif t == "MultiEdit": text = "\n".join(e.get("new_string", "") for e in i.get("edits", []))
@@ -220,6 +232,10 @@ print(t); print(real); print(1 if inside else 0); sys.stdout.write(text)
   text=$(printf '%s\n' "$parsed" | sed 1,3d)
   case "$tool" in
     Bash) bash_writes_memory "$text" || return 0 ;;
+    Patch)
+      local f hit=0
+      while IFS= read -r f; do is_memory_path "$f" && hit=1; done < <(printf '%s\n' "$path" | tr '\t' '\n')
+      [[ $hit -eq 1 ]] || return 0 ;;
     Read|Write|Edit|MultiEdit) [[ "$inside" == 1 ]] || is_memory_path "$path" || return 0 ;;
     *) return 0 ;;
   esac
@@ -228,7 +244,7 @@ print(t); print(real); print(1 if inside else 0); sys.stdout.write(text)
     printf 'BLOCKED: this write to memory contains a secret (%s). Memory may be synced, so it holds references only. Ask the user to store the value with `memory-3layer secret put <name>`, then write secret://<name>. Do not repeat the value. If this is a false positive, add %s to that line.\n' "$kinds" "$IGNORE_MARK" >&2
     return 2
   fi
-  if [[ "$tool" != Bash && "$inside" == 1 ]]; then
+  if [[ "$tool" != Bash && "$tool" != Patch && "$inside" == 1 ]]; then
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"memory-3layer data directory"}}\n'
   fi
   return 0
