@@ -1,0 +1,29 @@
+# memory-3layer — optional runtime config (shell-sourced).
+# Installed to ~/.config/memory-3layer/config. Set MEMORY_3LAYER_HOME here to move the data. Edit freely; the installer never
+# overwrites your copy (treated as user data, like IDENTITY.md).
+#
+# All limits are in BYTES (measured with `wc -c`). 0 = disabled (no limit).
+# Bytes are a stable proxy for token cost and don't depend on line width.
+
+# --- L2 SESSION.md size guardrail ---
+# Checked at every session start.
+#   soft: inject a gentle "rotate when convenient" recommendation
+#   hard: inject a "rotate BEFORE continuing" instruction
+# Tune on your real data. Empirically a journaling SESSION.md can reach
+# hundreds of KB; ~40KB soft / ~80KB hard is a sane start (~10k/20k tokens).
+L2_SOFT_BYTES=40000
+L2_HARD_BYTES=80000
+
+# --- /memory rotate behaviour ---
+# How many most-recent CLOSED arcs to keep inline in SESSION.md (the rest of
+# the closed arcs are relocated to the archive). Active sections
+# (Goal/State/Open questions/Blockers/active arc) are NEVER rotated.
+L2_KEEP_ARCS=2
+
+# Archive target naming:
+#   1 -> SESSION.archive.YYYY-MM.md (one file per month, alongside SESSION.md)
+#   0 -> SESSION.archive.md         (single growing file)
+# Either way the archive lives under the project's memory/ dir, which qmd
+# already indexes — so /recall can surface relocated arcs. It is NEVER
+# auto-injected into context.
+L2_ARCHIVE_BY_MONTH=1

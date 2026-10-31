@@ -1,3 +1,5 @@
+> The plugin is the supported install: see [README.md](README.md). This file describes the manual `install.sh` route, and parts of it predate the current layout.
+
 # Claude Code 3-Layer Memory System — Installation (v6)
 
 A replacement for Claude Code's default memory system, battle-tested over a few weeks of real use across multiple projects. **v6 adds retrieval tools** (qmd-based hybrid search, universal-ctags symbol map) on top of the curated-markdown core.
@@ -12,10 +14,10 @@ Three layers with different decay rates and **deliberate placement** — codebas
 | **L1a Repo entry** | `<repo>/CLAUDE.md` | **yes** | thin entry point: commands, conventions, **doc index** |
 | **L1b Repo docs** | `<repo>/.claude-docs/*.md` | **yes** | thick lazy-loaded: `gotchas.md` (highest leverage), `architecture.md`, `conventions.md`, etc. |
 | **L1-fallback** | `~/.claude/projects/<slug>/memory/project.md` | no | for projects without a repo, or where in-repo isn't appropriate |
-| **L2 Session** | `~/.claude/projects/<slug>/memory/SESSION.md` | no | per-task working state — survives compact, dies with task |
+| **L2 Session** | `~/.claude/projects/<slug>/memory/SESSION.md` | no | per-task working state — survives compact; bounded window, closed arcs rotate to `SESSION.archive[.YYYY-MM].md` |
 
 Two hooks enforce discipline:
-- **SessionStart** — injects protocol reminder; warns if `SESSION.md` is >24h stale (likely from a different task; model must surface this and ask user before continuing)
+- **SessionStart** — injects protocol reminder; warns if `SESSION.md` is >24h stale (likely from a different task; model must surface this and ask user before continuing) **or** has outgrown its size budget (soft/hard byte limits in `~/.claude/.memory-config` → nudge to run `/memory rotate`)
 - **PreCompact** — reminds Claude to flush working state to `SESSION.md` before compaction wipes everything
 
 The killer move: **gotchas in L1b** + **verbatim Recent turns in L2**. Future sessions hit the same project foot-guns with a one-line warning waiting; post-compact recovery doesn't lose the user's exact wording. Knowledge that should be team-shared lives in git, not on one developer's laptop.
@@ -51,7 +53,8 @@ The script writes everything under `$CLAUDE_HOME` (defaults to `~/.claude`). Man
 | File / dir | Behaviour |
 |---|---|
 | `~/.claude/memory/IDENTITY.md` | **Preserved if exists.** Template installed as `IDENTITY.template.md` alongside, for reference. |
-| `~/.claude/projects/` | **Never touched.** Your `SESSION.md` + `project.md` + `legacy/` stay as-is. |
+| `~/.claude/projects/` | **Never touched.** Your `SESSION.md` + `SESSION.archive*.md` + `project.md` + `legacy/` stay as-is. |
+| `~/.claude/.memory-config` | **Preserved if exists** (your tuned L2 size limits). Template installed as `.memory-config.template` alongside, for reference. |
 | `~/.claude/CLAUDE.md` | Replaced, `.bak-<ts>` backup if content differs. |
 | `~/.claude/hooks/*.sh` | Replaced, `.bak-<ts>` backup if content differs. |
 | `~/.claude/commands/{recall,memory,codemap}.md` | Replaced, `.bak-<ts>` backup if content differs. (Your own `task.md`/etc. untouched.) |
@@ -72,26 +75,6 @@ for f in ~/.claude/**/*.bak-$TS; do mv "$f" "${f%.bak-$TS}"; done
 `SESSION.md` and `project.md` files written by earlier versions of this protocol use HTML comments (`<!-- last_updated: ISO -->`) for the staleness marker. The hook's regex accepts both the legacy HTML-comment form and the new YAML frontmatter. **No migration required** — old files keep working immediately.
 
 Old account-local files from the pre-2026-04-30 system (`MEMORY.md`, `feedback_*.md`, `project_*.md`, `reference_*.md`) are ignored by the new hook — they sit harmlessly on disk.
-
-### Migrating older data (optional but recommended)
-
-Two migration paths, both shipped in the package:
-
-**Mechanical (no AI needed) — `migrate.sh`** handles HTML-comment `last_updated` → YAML frontmatter, with backup. Auto-detects pre-2026-04-30 legacy directories and prints guidance for the next step.
-
-```bash
-./migrate.sh --dry-run   # preview
-./migrate.sh             # apply (writes .bak-<ts> for each touched file)
-```
-
-**Smart synthesis — `/migrate-legacy-memory` slash command** (requires Claude Code session). Spawns an Agent that reads each legacy directory, synthesizes a single new-format `project.md` per project preserving verbatim technical details (reviewer quotes, exact paths, error messages), and moves originals into `<slug>/memory/legacy/` as backup.
-
-```
-# In any Claude Code session:
-/migrate-legacy-memory
-```
-
-The slash command is non-destructive: only `mv` to `legacy/`, never `rm`. Skips projects that already have new-format `project.md`. Safe to re-run.
 
 ## Manual install (alternative to `install.sh`)
 
@@ -162,7 +145,7 @@ cp <pkg>/templates/project.md.fallback.template ~/.claude/projects/<slug>/memory
 $EDITOR ~/.claude/projects/<slug>/memory/project.md
 ```
 
-Compute slug from cwd: `C:\dev\foo` → `C--dev-foo` (drive uppercase + `--` + remaining path with `/`→`-`).
+Compute slug from cwd (replace every `/` and `.` with `-`): Git-Bash `C:\dev\foo` → `C--dev-foo`; native Unix `/home/u/foo.bar` → `-home-u-foo-bar` (leading dash kept).
 
 ### 6. Verify
 
@@ -173,6 +156,18 @@ tail -f ~/.claude/debug/hook-trace.log
 ```
 
 To see the staleness warning fire end-to-end: artificially backdate a SESSION.md by replacing its first-line `last_updated` with a timestamp >24h ago, start a fresh session, and Claude should explicitly ask you "continue or reset?" instead of silently using the loaded state.
+
+## Secrets
+
+Memory holds `secret://<name>` references; values stay in a local store and don't move between machines.
+
+```bash
+~/.claude/bin/memory-secrets.sh put db-password            # hidden prompt, or stdin
+~/.claude/bin/memory-secrets.sh run PGPASSWORD=db-password -- psql -h db.local
+~/.claude/bin/memory-secrets.sh scan                       # check memory; prints no values
+```
+
+The store is `~/.local/share/agent-secrets` (override with `MEMORY_SECRETS_DIR`). Files are mode 600 and not encrypted at rest. To block secrets from being written to memory in Claude Code, merge the `PreToolUse` entry from `settings.snippet.json` into `~/.claude/settings.json`.
 
 ## How it works (TL;DR for the model)
 
@@ -276,10 +271,10 @@ This scales well — a real reverse-engineering project in this workflow accumul
 
 - **In-repo L1, not account-local.** The fundamental fix vs typical "Claude memory" patterns: codebase knowledge lives **with** the codebase. Single source of truth, version-controlled, travels with clones, teammates see it, server agents see it.
 - **Thin entry + thick lazy index.** `<repo>/CLAUDE.md` is auto-loaded — bloated content there eats context across every session. Thick docs go in `.claude-docs/*.md` and are read by the model only when the doc index in CLAUDE.md routes a task to them.
-- **No journal/archive layer.** Sessions are about different tasks; carrying them forward is noise. Layer = decay rate, period.
+- **L2 is a bounded window, not a journal.** Active-task scratch only. Closed arcs don't accumulate — when `SESSION.md` crosses its size budget (`~/.claude/.memory-config`), `/memory rotate` relocates them losslessly to a recall-only archive (`SESSION.archive[.YYYY-MM].md`), never auto-injected. Layer = decay rate; the archive is the slow-decay tail of L2, not a separate always-loaded layer.
 - **Promotion is explicit.** No auto-archival. The user, not the model, decides what crosses session boundaries.
 - **Gotchas in L1b are the highest-leverage memory.** Every project accumulates non-obvious foot-guns. A one-paragraph warning in `gotchas.md` saves the next agent (or your future self) hours of debugging.
-- **Project slug rule:** `C:\dev\foo` → `C--dev-foo` (drive uppercase + `--` + remaining path with `/`→`-`). Matches Claude Code's existing `~/.claude/projects/` directory naming.
+- **Project slug rule:** matches Claude Code's `~/.claude/projects/` naming — replace every `/` and `.` with `-`. Git-Bash drive path `C:\dev\foo` → `C--dev-foo`; native Unix path `/home/u/foo.bar` → `-home-u-foo-bar` (leading dash kept).
 - **`last_updated` lives in YAML frontmatter** (parseable by hook, Obsidian, eyes). Legacy HTML-comment format still works.
 - **Pure bash hooks**, no Python (Python is often missing on Windows).
 - **Recent turns kept verbatim.** The compact summarizer paraphrases away texture; verbatim quotes preserve it.

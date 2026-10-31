@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""List Claude Code's native memory for `memory-3layer import`. Reads only.
+
+Output contract, shared by every harness adapter, one tab-separated line per file:
+    <project dir, "-" if unknown>  <label>  <kind>  <file>
+Files from an older memory-3layer that share this folder (SESSION*, project.md)
+are skipped: they belong to the migration, not to the harness.
+"""
+import glob
+import json
+import os
+import re
+import sys
+
+root = os.environ.get("CLAUDE_HOME") or os.path.expanduser("~/.claude")
+projects = os.path.join(root, "projects")
+
+
+def sanitize(path):
+    return re.sub(r"[^a-zA-Z0-9]", "-", path)
+
+
+def cwd_from_transcripts(project):
+    files = glob.glob(os.path.join(project, "*.jsonl"))
+    for path in sorted(files, key=os.path.getmtime, reverse=True):
+        with open(path, errors="ignore") as f:
+            for line in f:
+                if '"cwd"' not in line:
+                    continue
+                try:
+                    cwd = json.loads(line).get("cwd")
+                except ValueError:
+                    continue
+                if cwd:
+                    return cwd
+    return None
+
+
+def find_by_slug(slug):
+    """Walk the disk for a directory whose sanitized path equals the slug.
+
+    The slug alone is ambiguous, since "/", "." and "-" all became "-", but only
+    existing directories can match. More than one match counts as unknown.
+    """
+    found = []
+
+    def walk(base):
+        if sanitize(base) == slug:
+            found.append(base)
+            return
+        try:
+            names = os.listdir(base)
+        except OSError:
+            return
+        for name in names:
+            child = os.path.join(base, name)
+            if slug.startswith(sanitize(child)) and os.path.isdir(child):
+                walk(child)
+
+    walk("/")
+    return found[0] if len(found) == 1 else None
+
+
+def has_content(path):
+    """False for an index that only links to SESSION.md or is empty."""
+    with open(path, errors="ignore") as f:
+        lines = [x.strip() for x in f if x.strip()]
+    return any("SESSION.md" not in x for x in lines)
+
+
+def kind_of(path):
+    with open(path, errors="ignore") as f:
+        head = f.read(600)
+    m = re.search(r"^\s*type:\s*(\w+)", head, re.M)
+    return m.group(1) if m else "note"
+
+
+def configured_dir(path):
+    """autoMemoryDirectory from one settings file, expanded, or None."""
+    try:
+        with open(path) as f:
+            value = json.load(f).get("autoMemoryDirectory")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(value, str) or not value:
+        return None
+    return os.path.normpath(os.path.expanduser(value))
+
+
+def global_dir():
+    # A managed policy wins over the user's own settings.
+    for path in ("/etc/claude-code/managed-settings.json",
+                 "/Library/Application Support/ClaudeCode/managed-settings.json",
+                 os.path.join(root, "settings.json")):
+        found = configured_dir(path)
+        if found:
+            return found
+    return None
+
+
+def project_dir_override(cwd):
+    # Claude ignores a value checked into .claude/settings.json in some versions and
+    # honours it after a trust check in others. Reading more here is harmless.
+    for name in ("settings.local.json", "settings.json"):
+        found = configured_dir(os.path.join(cwd, ".claude", name))
+        if found:
+            return found
+    return None
+
+
+def native_rows(memory):
+    rows = []
+    names = sorted(n for n in os.listdir(memory) if n.endswith(".md"))
+    for name in names:
+        path = os.path.join(memory, name)
+        if name.startswith("SESSION") or name == "project.md":
+            continue
+        if name == "MEMORY.md":
+            if has_content(path):
+                rows.append(("index", path))
+        else:
+            rows.append((kind_of(path), path))
+    return rows
+
+
+def legacy_rows(memory):
+    names = sorted(os.listdir(memory))
+    return [("legacy", os.path.join(memory, n)) for n in names
+            if (n.startswith("SESSION") or n == "project.md")
+            and os.path.isfile(os.path.join(memory, n))]
+
+
+def resolve(slug, project):
+    cwd = cwd_from_transcripts(project)
+    if not cwd or not os.path.isdir(cwd):
+        cwd = find_by_slug(slug)
+    return cwd or "-"
+
+
+def emit(cwd, label, rows, seen):
+    for kind, path in rows:
+        if path not in seen:
+            seen.add(path)
+            print("\t".join((cwd, label, kind, path)))
+
+
+legacy = "--legacy" in sys.argv
+seen = set()
+if legacy:
+    for kind, path in (("identity", os.path.join(root, "memory", "IDENTITY.md")),
+                       ("config", os.path.join(root, ".memory-config"))):
+        if os.path.isfile(path):
+            emit("-", "account", [(kind, path)], seen)
+
+shared = global_dir()
+if os.path.isdir(projects):
+    for slug in sorted(os.listdir(projects)):
+        project = os.path.join(projects, slug)
+        memory = os.path.join(project, "memory")
+        has_memory = os.path.isdir(memory)
+        rows = []
+        if has_memory:
+            rows = legacy_rows(memory) if legacy else native_rows(memory)
+        cwd = resolve(slug, project) if (rows or not legacy) else "-"
+        emit(cwd, slug, rows, seen)
+        if not legacy and cwd != "-":
+            custom = project_dir_override(cwd)
+            if custom and os.path.isdir(custom) and custom != memory:
+                emit(cwd, slug, native_rows(custom), seen)
+
+# A directory set for the whole account mixes all projects, so its files can't be
+# attributed to one. They are reported as having no known project.
+if not legacy and shared and os.path.isdir(shared):
+    emit("-", "autoMemoryDirectory", native_rows(shared), seen)

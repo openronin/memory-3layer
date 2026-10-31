@@ -4,6 +4,19 @@
 
 A replacement for Claude Code's default memory system, battle-tested on ~15 real projects (PHP/mpcmf, Python, TS, reverse-engineering, multi-machine setups).
 
+## Install
+
+As a Claude Code plugin:
+
+```
+/plugin marketplace add openronin/memory-3layer-claude-code
+/plugin install memory-3layer@memory-3layer
+```
+
+Restart the session. Nothing leaves the machine until you set a storage: see [docs/sync.md](docs/sync.md).
+
+Coming from an older version: `memory-3layer migrate claude-code` shows a plan, `--apply` copies. Sources are left in place.
+
 ## Why
 
 After trying the popular options:
@@ -28,7 +41,8 @@ Codebase facts go with the codebase. Personal preferences and per-task scratch s
 | **L1a Repo entry** | `<repo>/CLAUDE.md` | **yes** | per-project; thin, auto-loaded |
 | **L1b Repo docs** | `<repo>/.claude-docs/*.md` | **yes** | per-project; thick, lazy-loaded |
 | **L1 fallback** | `~/.claude/projects/<slug>/memory/project.md` | no | for repos where in-repo isn't appropriate |
-| **L2 Session** | `~/.claude/projects/<slug>/memory/SESSION.md` | no | per-task; dies when task ends |
+| **L2 Session** | `~/.claude/projects/<slug>/memory/SESSION.md` | no | per-task; bounded window, closed arcs rotate out |
+| **L2 Archive** | `~/.claude/projects/<slug>/memory/SESSION.archive[.YYYY-MM].md` | no | closed arcs, recall-only, never auto-loaded |
 
 `<repo>/CLAUDE.md` is loaded into every session by Claude Code automatically — keep it **thin**. Bulky knowledge lives in `<repo>/.claude-docs/*.md` and is read on demand via the doc index in `CLAUDE.md`.
 
@@ -56,13 +70,13 @@ universal-ctags + ripgrep. Cache at `<repo>/.codemap.tags` (gitignore-able). Aut
 /codemap outline
 ```
 
-### `/memory status | auto on|off | refresh` — protocol controls
+### `/memory status | auto on|off | refresh | rotate` — protocol controls
 
-Default mode is **explicit-promotion** — cross-session memory only when the user says "remember"/"запомни". Toggle to auto-capture per-session if you want it.
+Default mode is **explicit-promotion** — cross-session memory only when the user says "remember"/"запомни". Toggle to auto-capture per-session if you want it. `rotate [--dry-run]` relocates closed L2 arcs into the recall-only archive (lossless) to keep `SESSION.md` within its size budget.
 
 ## Hooks (enforce discipline)
 
-- **SessionStart** — injects protocol reminder, detects stale `SESSION.md` (>24h since last update → forces explicit *"continue or reset?"* with user). Also kicks background `qmd update + embed` debounced 6h.
+- **SessionStart** — injects protocol reminder; detects stale `SESSION.md` (>24h since last update → forces explicit *"continue or reset?"*) **and** oversized `SESSION.md` (soft/hard byte limits from `~/.claude/.memory-config` → nudge to `/memory rotate`). Also kicks a background `qmd update` (FTS only) debounced 6h.
 - **PreCompact** — reminds Claude to flush working state to `SESSION.md` before compaction wipes context. `SESSION.md` is the only artifact that survives compaction with full fidelity.
 
 ## What's deliberately NOT in it
@@ -104,10 +118,11 @@ memory/IDENTITY.md              — L0 template
 templates/repo/CLAUDE.md        — L1a template (thin in-repo entry)
 templates/repo/.claude-docs/*   — L1b templates (gotchas, architecture, conventions, index)
 templates/project.md.fallback.template — L1-fallback template (account-local)
-hooks/session-start.sh          — staleness check + protocol injection + qmd auto-refresh
+hooks/session-start.sh          — staleness + L2 size check + protocol injection + qmd auto-refresh
 hooks/pre-compact.sh            — pre-compact flush reminder
 commands/{recall,codemap,memory}.md — slash command definitions
-bin/codemap.sh                  — universal-ctags + ripgrep symbol map
+bin/{codemap,memstat}.sh        — symbol map + memory-subsystem dispatcher
+.memory-config.template         — optional runtime config (L2 size limits); installed to ~/.claude/.memory-config
 settings.snippet.json           — hooks block for ~/.claude/settings.json
 ```
 

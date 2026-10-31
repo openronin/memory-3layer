@@ -8,7 +8,7 @@
 #   memstat.sh --watch    # live, refresh every 3s (Ctrl-C to exit)
 #   memstat.sh --watch 5  # live, custom interval
 
-CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/memory-3layer"
 # Augment PATH with common Node/npm locations (Windows + Unix).
 # Normalizes Windows paths (C:\... with backslashes) to unix form, since
 # $APPDATA/$USERPROFILE come back backslash-style in Git Bash and would
@@ -194,7 +194,7 @@ render() {
 
   # --- REFRESH SCHEDULE ---
   printf '%sREFRESH (SessionStart hook, 6h debounce)%s\n' "$c_bold" "$c_reset"
-  local marker="$CLAUDE_HOME/.qmd-last-refresh"
+  local marker="$STATE_DIR/last-refresh"
   if [[ -f "$marker" ]]; then
     local last age_r; last=$(cat "$marker" 2>/dev/null || echo 0); age_r=$((now - last))
     local due="not yet"; (( age_r > 21600 )) && due="${c_yel}due${c_reset}"
@@ -207,7 +207,7 @@ render() {
   # --- ACTIVITY ---
   printf '%sACTIVITY%s\n' "$c_bold" "$c_reset"
   for lg in qmd-refresh.log qmd-embed.log qmd-embed-retry.log; do
-    local p="$CLAUDE_HOME/logs/$lg"
+    local p="$STATE_DIR/$lg"
     [[ -f "$p" ]] || continue
     local mt; mt=$(stat -c %Y "$p" 2>/dev/null || echo 0)
     local lastline; lastline=$(grep -vE '^\s*$|\[?\?25|^\[2K' "$p" 2>/dev/null | tail -1 | tr -d '\r' | cut -c1-58)

@@ -1,0 +1,20 @@
+{
+  "name": "memory-3layer",
+  "owner": {
+    "name": "openronin",
+    "url": "https://github.com/openronin"
+  },
+  "description": "Agent memory that belongs to no harness",
+  "plugins": [
+    {
+      "name": "memory-3layer",
+      "displayName": "memory-3layer",
+      "source": "./",
+      "description": "Agent memory that belongs to no harness: identity, project notes and working state, keyed by repository, synced through your own git storages.",
+      "category": "productivity",
+      "keywords": ["memory", "git", "agents", "sync"],
+      "homepage": "https://github.com/openronin/memory-3layer",
+      "repository": "https://github.com/openronin/memory-3layer"
+    }
+  ]
+}

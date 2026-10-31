@@ -1,12 +1,14 @@
-# Memory Protocol (overrides default)
+# Memory Protocol (memory-3layer)
 
-The memory system described in your default system prompt is **disabled**. Use this protocol instead.
+This is the memory that survives a new machine or a different agent. A harness may also have memory of its own, and the two can run side by side: that memory stays a harness-local cache, and anything that must last goes here.
+
+`<home>` below is the output of `memory-3layer path home` (default `~/.local/share/memory-3layer`). `<key>` is the output of `memory-3layer key`. `memory-3layer path project` prints `<home>/projects/<key>` directly.
 
 ## Core principle
 
 > **"Would a server agent at midnight, with no memory and no human, need this?"**
 > — yes → it goes **in the repo** (git-tracked, travels with code, visible to teammates and headless agents)
-> — no → it goes in **account-local memory** (`~/.claude/memory/...` or per-project `~/.claude/projects/.../memory/`)
+> — no → it goes in **account-local memory** (`<home>/identity/` or per-project `<home>/projects/<key>/`)
 
 Codebase facts (architecture, conventions, gotchas) live with the codebase. Personal preferences and per-task scratch live in account memory. Don't cross the wires.
 
@@ -14,26 +16,29 @@ Codebase facts (architecture, conventions, gotchas) live with the codebase. Pers
 
 | Layer | Path | Loaded | Git-tracked | Purpose |
 |---|---|---|---|---|
-| **L0 Identity** | `~/.claude/memory/IDENTITY.md` | every session start | no (account-personal) | who you are, hard preferences, env-wide credentials |
+| **L0 Identity** | `<home>/identity/IDENTITY.md` | every session start | no (account-personal) | who you are, hard preferences, env-wide credentials |
 | **L1a Repo entry** | `<repo>/CLAUDE.md` | every session start (auto by Claude Code when cwd is inside repo) | **yes** | thin: commands, top-level conventions, MUST/MUST NOT, **doc index** pointing at L1b |
 | **L1b Repo docs** | `<repo>/.claude-docs/*.md` | on demand via L1a's index | **yes** | thick: `gotchas.md`, `architecture.md`, `conventions.md`, `patterns.md`, `cookbook.md`, etc. — read what the task needs |
-| **L1-fallback** | `~/.claude/projects/<slug>/memory/project.md` | every session start (via SessionStart hook) | no | for projects without a repo, or where in-repo L1 isn't appropriate (proprietary, solo) |
-| **L2 Session** | `~/.claude/projects/<slug>/memory/SESSION.md` | every session start + after every compact | no | per-task working state — survives compact, dies with task |
+| **L1-fallback** | `<home>/projects/<key>/project.md` | every session start (via SessionStart hook) | no | for projects without a repo, or where in-repo L1 isn't appropriate (proprietary, solo) |
+| **L2 Session** | `<home>/projects/<key>/SESSION.md` | every session start + after every compact | no | per-task working state — survives compact; bounded window, closed arcs rotate to archive |
+| **L2 Archive** | `<home>/projects/<key>/SESSION.archive[.YYYY-MM].md` | on demand via `/recall` only | no | closed arcs relocated out of L2 — searchable, never auto-injected |
 
-`<slug>` = cwd with drive letter, then `--`, then remaining path with `\`/`/` replaced by single `-` (e.g. `C:\dev\local` → `C--dev-local`). Matches Claude Code's `~/.claude/projects/` directory naming.
+`<key>` is the project's git remote without the scheme, credentials or `.git` (`github.com/owner/repo`), so it is the same on every machine, in every worktree and in every subdirectory. The key is chosen in this order, each step falling back to the next: a `.memory-3layer-key` file (set with `memory-3layer pin <key>`), the git remote, the path under `$HOME` (`local/<path>`). Use `pin` for a project with no remote, or one whose remote differs between machines. After a remote changes, `memory-3layer rekey <old> <new>` moves the memory.
+
+One repo has one L2, whatever branches a session touches. Inside the repo, write paths relative to its root: the same project can sit elsewhere on another machine.
 
 `<repo>` = the git repo root for the current cwd (`git rev-parse --show-toplevel`).
 
-There is no journal/archive layer. Sessions are about different tasks; carrying them forward is noise.
+L2 is a **bounded window** of active work, not an unbounded journal. Closed arcs don't accumulate in `SESSION.md` — they're relocated **losslessly** to the recall-only L2 archive (full text moves; a one-line stub + pointer stays inline) via `/memory rotate`. The archive is searchable through `/recall` but never auto-injected into context. **Budget:** keep `SESSION.md` to roughly the active task + the last 1–2 closed arcs — soft ~40 KB / hard ~80 KB, configurable in the file printed by `memory-3layer path config` (`0` = no limit). The session-start hook warns when you cross a limit; rotation is a deliberate decision, not silent truncation.
 
 ## ON SESSION START — DO THIS FIRST
 
 Before answering the user's first message, run these reads in parallel:
 
-1. `Read ~/.claude/memory/IDENTITY.md` (L0)
+1. `Read <home>/identity/IDENTITY.md` (L0)
 2. `<repo>/CLAUDE.md` is auto-loaded by Claude Code when cwd is inside a repo — it's already in your context, treat it as L1a. **Do NOT auto-read every file under `<repo>/.claude-docs/`** — open them on demand based on the index in `<repo>/CLAUDE.md`.
-3. `Read ~/.claude/projects/<slug>/memory/SESSION.md` if it exists (L2 — your working state from before any compact/restart, treat as authoritative)
-4. `Read ~/.claude/projects/<slug>/memory/project.md` if it exists (L1-fallback — relevant when repo doesn't have its own `<repo>/CLAUDE.md`)
+3. `Read <home>/projects/<key>/SESSION.md` if it exists (L2 — your working state from before any compact/restart, treat as authoritative)
+4. `Read <home>/projects/<key>/project.md` if it exists (L1-fallback — relevant when repo doesn't have its own `<repo>/CLAUDE.md`)
 
 If neither L1a (`<repo>/CLAUDE.md`) nor L1-fallback exists, and the user starts substantive work, propose creating one — **default to in-repo L1a** (`<repo>/CLAUDE.md` + `<repo>/.claude-docs/`) unless the user opts for the local fallback.
 
@@ -50,9 +55,9 @@ Do this even if a SessionStart hook also fires — idempotent.
 | Codebase-wide convention (naming, commit style, lint rules) | `<repo>/.claude-docs/conventions.md` |
 | New endpoint group, new store, new component category | matching file in `<repo>/.claude-docs/` |
 | Top-level command, MUST/MUST NOT, doc-index entry | `<repo>/CLAUDE.md` (keep it thin — it's the entry point, not the manual) |
-| What's in flight on the current branch | `~/.claude/projects/<slug>/memory/SESSION.md` (per-task) |
-| User identity, hard preference, env-wide credential (SSH wrapper, AWS profile) | `~/.claude/memory/IDENTITY.md` |
-| Project context for a project without an in-repo `CLAUDE.md` | `~/.claude/projects/<slug>/memory/project.md` (L1-fallback) |
+| What's in flight on the current branch | `<home>/projects/<key>/SESSION.md` (per-task) |
+| User identity, hard preference, env-wide credential (SSH wrapper, AWS profile) | `<home>/identity/IDENTITY.md` |
+| Project context for a project without an in-repo `CLAUDE.md` | `<home>/projects/<key>/project.md` (L1-fallback) |
 
 **Never put codebase facts in account memory.** They belong in `<repo>/.claude-docs/`. If you find a `project.md` (L1-fallback) fact that's clearly a codebase fact, propose promoting it to in-repo L1.
 
@@ -68,18 +73,27 @@ Do this even if a SessionStart hook also fires — idempotent.
    - After every meaningful action: update `# State` (last action, next step)
    - After identifying a key file: append to `# File map` with `path:line — what`
    - Open questions and blockers get their own sections
-   - **Ad-hoc sections are encouraged.** When a phase of work deserves its own block (e.g. "Прогон 2026-05-07", "Design session 2026-05-06", "WEB FIX <hash>"), add it. The template is a floor, not a ceiling.
+   - **Ad-hoc sections are encouraged.** When a phase of work deserves its own block, add it. The template is a floor, not a ceiling. **Give each dated arc a self-summarizing heading** — `# [YYYY-MM-DD] <tag> — <one-line outcome>` — and append a status marker (`СДЕЛАНО` / `ГОТОВО` / `DONE`) when it closes. This makes rotation deterministic and the stub free: the heading IS the summary that stays behind when the body moves to the archive.
+   - **L2 is a bounded window, not a journal.** Closed arcs don't pile up forever — when the session-start hook warns you've crossed the soft/hard size limit, run `/memory rotate` to relocate closed arcs to the L2 archive (lossless; recall-only). Never let `SESSION.md` grow unbounded; never truncate active state to shrink it (Goal/State/Open questions/Blockers/active arc are off-limits to rotation).
 5. **PreCompact = mandatory flush.** Before compaction: write everything you'd need to resume to SESSION.md. The hook will remind you. After compact, your first action is `Read SESSION.md`.
    - On **every** write to SESSION.md, refresh the top-line `last_updated:` (in YAML frontmatter, or legacy HTML comment) to the current UTC ISO timestamp. The session-start hook uses this to detect stale state.
    - If the SessionStart hook injects a `SESSION.md is stale` warning (>24h since last_updated), do NOT silently continue with the loaded state — surface it to the user: "SESSION.md last touched <X> ago, goal was <Y>. Continue or reset?"
+   - If the hook injects an `L2 SOFT/HARD LIMIT` warning, the file has outgrown its budget — run `/memory rotate` (hard = before continuing other work, soft = at the next natural pause). See rule 4.
 6. **Promotion, not archival.** Cross-session memory persists ONLY when the user explicitly says so ("remember", "запомни"). On such an explicit signal:
    - About the user / their preferences / cross-project credentials → promote into `IDENTITY.md`
    - About the current codebase (architecture, gotchas, conventions) → propose promoting into `<repo>/CLAUDE.md` or `<repo>/.claude-docs/<file>.md` and let the user commit
-   - About a project that has no repo / shouldn't go in repo → `<project>/memory/project.md` (L1-fallback)
+   - About a project that has no repo / shouldn't go in repo → `<home>/projects/<key>/project.md` (L1-fallback)
    - Otherwise → ask which layer
    On task wrap-up without an explicit signal: SESSION.md is wiped to the template. **Do not auto-promote.**
 7. **Gotchas are the highest-leverage memory.** When you discover a non-obvious foot-gun (config quirk, framework gotcha, API peculiarity, naming collision, "looks wrong but is intentional"), it goes in `<repo>/.claude-docs/gotchas.md`. Future sessions hit the same wall and benefit immediately.
 8. **Server-agent test.** Before writing anything to account-local memory, ask: "Would a fresh agent who clones this repo at midnight need this?" If yes, push it in-repo.
+9. **Secrets never enter memory, in any layer.** Memory may be synced, so it holds references only: `secret://<name>` (plus where it is used). Values live in the machine-local store managed by ``memory-3layer secret`, outside any synced directory.
+   - New value from the user → ask them to run `! memory-3layer secret put <name>`, then write only `secret://<name>`.
+   - Use a value → `memory-3layer secret run VAR=<name> -- <command>`. Don't print it; `get` works only in a terminal.
+   - `secret://<name>` missing on this machine → ask the user for it. Don't look for a copy in transcripts or logs.
+   - `memory-3layer secret scan` reports `file:line` and kind, never the value; `adopt <file>:<line> <name>` moves a found value into the store. The `guard` PreToolUse hook blocks such writes where the harness supports it; it is a net, not a substitute for this rule.
+
+10. **Harness memory is a source, not a store.** `memory-3layer import <harness>` shows what a harness has saved in its own memory, and `--apply` copies it to `<home>/projects/<key>/imported/<harness>/`. The copy is unreviewed: verify a note before relying on it, and move what still holds into `project.md` or the repo docs under rule 6.
 
 ## Workflow patterns
 
@@ -93,9 +107,9 @@ When the user signals an upcoming compact ("compact me", "теперь можн�
 
 ### Post-compact recovery
 First tool calls after a compact, in parallel:
-- `Read ~/.claude/memory/IDENTITY.md`
-- `Read ~/.claude/projects/<slug>/memory/SESSION.md`
-- `Read ~/.claude/projects/<slug>/memory/project.md` (if exists)
+- `Read <home>/identity/IDENTITY.md`
+- `Read <home>/projects/<key>/SESSION.md`
+- `Read <home>/projects/<key>/project.md` (if exists)
 - Any specific `<repo>/.claude-docs/<file>.md` SESSION points at as "needed for full picture"
 - (`<repo>/CLAUDE.md` is auto-loaded — verify it's actually in your context)
 
@@ -107,9 +121,11 @@ If you're working in a side worktree or another chat is touching the same projec
 ### Distillation on task wrap-up
 When the user says "task done" / "done" / "wrap it up" without "remember": rewrite SESSION.md to the empty template, preserving only `# Goal: (none — last task: <X>)`. Do **not** auto-promote.
 
+This event-driven reset is the clean case. But tasks often bleed into one another and the explicit "done" never comes — so L2 also has a **state-driven** backstop: the size guardrail. When `SESSION.md` crosses the soft/hard byte limit, the hook warns and `/memory rotate` relocates *closed* arcs to the archive without ending the task. Wrap-up reset and mid-task rotation are complementary: reset is for "this task is over", rotation is for "this task is long and the journal is heavy".
+
 ### Bootstrapping in-repo L1
 When the user starts substantive work in a repo with no `<repo>/CLAUDE.md`:
-1. Propose creating it. Use templates from `~/.claude/dist/claude-memory-3layer/templates/repo/` if available, else write from the shapes shown below.
+1. Propose creating it. Use templates from `~/.claude/dist/memory-3layer/templates/repo/` if available, else write from the shapes shown below.
 2. Create `<repo>/.claude-docs/` with at minimum `index.md` (routing table) and `gotchas.md` (start empty — populate as you discover).
 3. Add `<repo>/.claude-docs/architecture.md` only when you have something real to write — don't fabricate.
 4. Commit as part of the user's work, not a separate commit unless asked.
@@ -158,7 +174,7 @@ tags: [memory/l2, session]
 
 ## In-repo L1 templates (shapes)
 
-Full templates live in `~/.claude/dist/claude-memory-3layer/templates/repo/` and in the friend-package zip.
+Full templates live in `~/.claude/dist/memory-3layer/templates/repo/` and in the friend-package zip.
 
 **`<repo>/CLAUDE.md` (thin entry point):**
 ```markdown
@@ -195,15 +211,15 @@ Entry point for Claude Code agents. For deeper reference see [`.claude-docs/`](.
 
 Add more files when categories emerge: `patterns.md`, `cookbook.md`, `api.md`, `stores.md`, `ui-components.md` etc. The doc index is the only thing always loaded — additions just need an entry there.
 
-## L1-fallback template (`~/.claude/projects/<slug>/memory/project.md`)
+## L1-fallback template (`<home>/projects/<key>/project.md`)
 
-Use this only when the project has no repo or you don't want this in-repo. Same shape as `<repo>/CLAUDE.md` + a "Known gotchas" section folded in. Full template: `~/.claude/dist/claude-memory-3layer/templates/project.md.fallback.template`.
+Use this only when the project has no repo or you don't want this in-repo. Same shape as `<repo>/CLAUDE.md` + a "Known gotchas" section folded in. Full template: `~/.claude/dist/memory-3layer/templates/project.md.fallback.template`.
 
 When the L1-fallback grows past one file (deep reverse-engineering projects, multi-component systems, multi-protocol work), apply the **Knowledge store organization** convention below — same as `<repo>/.claude-docs/`.
 
 ## Knowledge store organization (when it grows)
 
-Both `<repo>/.claude-docs/` (L1b) and `~/.claude/projects/<slug>/memory/` (L1-fallback when single `project.md` outgrows itself) use the **flat + tags + filename-prefix** convention:
+Both `<repo>/.claude-docs/` (L1b) and `<home>/projects/<key>/` (L1-fallback when single `project.md` outgrows itself) use the **flat + tags + filename-prefix** convention:
 
 - **Flat by default; shallow grouping allowed when it helps `tree`-readability.** Tags do the primary categorization; subdirs are visual aid only. Rule: **at most one level of nesting**, and only when a category has 5+ peer files of the same type. Never nest deeper. Examples: `protocols/`, `formats/`, `handoffs/` OK; `protocols/v2/handshake/` not OK. Obsidian's tag panel renders hierarchical tags as a tree automatically — you get the visual hierarchy without paying the path-rewrite cost on refactor.
 - **Filename prefixes for grouping.** `protocol_<name>.md`, `format_<name>.md`, `handoff_<topic>.md`, `decoded_<thing>.md`, `recipe_<task>.md`. Alphabetical sort gives free visual clustering in `ls`. Underscore between prefix and name; lowercase.
@@ -223,7 +239,7 @@ When splitting: keep `project.md` (or `CLAUDE.md`) as the **thin entry + doc ind
 Memory files use YAML frontmatter (`last_updated`, `tags`) so vaults work out of the box.
 
 Vault options:
-- `~/.claude/` as vault → L0 + all L2 sessions + L1-fallback project.md files (cross-project graph)
+- `<home>` as vault → L0 + all L2 sessions + L1-fallback project.md files (cross-project graph)
 - `<repo>/` as vault → focused on one project's CLAUDE.md + .claude-docs/ (deep dive into one codebase)
 
 Conventions:
@@ -238,11 +254,11 @@ The context window is RAM — finite, expensive. The file system is disk — abu
 
 Three tools available via slash commands:
 
-- **`/recall <query>`** — hybrid search (BM25 + GGUF embeddings + LLM rerank) across `~/.claude/memory/` (L0) and `~/.claude/projects/*/memory/` (L1-fallback + L2). 100% local via qmd. Use for: "did we already see this gotcha?", "what was the MongoDB legacy quirk in mpcmf?", any knowledge-recall question across projects.
+- **`/recall <query>`** — hybrid search (BM25 + GGUF embeddings + LLM rerank) across `<home>` (L0 + L1-fallback + L2). 100% local via qmd. Use for: "did we already see this gotcha?", "what was the MongoDB legacy quirk in mpcmf?", any knowledge-recall question across projects.
 
 - **`/codemap def|callers|callees|outline <symbol>`** — on-demand symbol map for the current repo via universal-ctags + ripgrep. No daemon, no DB. Cache: `<repo>/.codemap.tags` (gitignore-friendly), auto-rebuilds when source files are newer. Use for: "where is X defined?", "who calls Y?", "what's the structure of this codebase?".
 
-- **`/memory status | auto on|off | refresh`** — protocol controls. `auto on` flips THIS session into auto-capture mode (model writes observations to SESSION.md / gotchas without waiting for "запомни"); `auto off` returns to default explicit-promotion. `refresh` forces qmd index rebuild.
+- **`/memory status | auto on|off | refresh | rotate`** — protocol controls. `auto on` flips THIS session into auto-capture mode (model writes observations to SESSION.md / gotchas without waiting for "запомни"); `auto off` returns to default explicit-promotion. `refresh` forces qmd index rebuild. `rotate [--dry-run]` relocates closed L2 arcs to the recall-only archive (lossless), keeping `SESSION.md` within its size budget — triggered by the hook's L2 size warning or run manually.
 
 - **`/memstat [--watch]`** — "task manager" for the memory subsystem. Shows running qmd/ctags processes (PID, RAM, runtime), index progress (vectors embedded vs pending, % coverage), refresh schedule, recent log activity, and a stall/health check (samples vector delta to confirm a running embed is making progress). Use when `node.exe` is eating CPU and you want to know what it's doing / whether it hung.
 
@@ -270,8 +286,8 @@ Rapid chain of short messages → group with `->`:
 - Git history facts — `git log` is authoritative
 - CLAUDE.md duplicates
 - Trivia ("user said hi today")
-- Secrets / tokens — write the env-var name or path, not the value
+- Secret values — write `secret://<name>`, an env-var name or a path instead (rule 9)
 
 ## Recovery
 
-Post-compact / post-restart: first tool calls are `Read ~/.claude/memory/IDENTITY.md` + `Read <project>/memory/SESSION.md` + `Read <project>/memory/project.md` (if exists). The repo's own `CLAUDE.md` is auto-loaded — verify it's in your context. The hook normally injects this reminder, but if not, do it anyway.
+Post-compact / post-restart: first tool calls are `Read <home>/identity/IDENTITY.md` + `Read <home>/projects/<key>/SESSION.md` + `Read <home>/projects/<key>/project.md` (if exists). The repo's own `CLAUDE.md` is auto-loaded — verify it's in your context. The hook normally injects this reminder, but if not, do it anyway.

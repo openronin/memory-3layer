@@ -1,5 +1,35 @@
 # Changelog
 
+## v7.0.0 — 2026-10-31 — Harness-independent memory, sync, plugin
+
+- Data moves out of the harness to `~/.local/share/memory-3layer`, keyed by the git remote, not by the directory. `memory-3layer migrate` and `import` bring older data and native notes.
+- Sync through git storages the user chooses, routed by layer and project, with per-storage access and `sync check`.
+- Installs as a Claude Code plugin, built and published from a release tag.
+- Removed: `migrate.sh`, `/migrate-legacy-memory`.
+
+## v6.4.0 — 2026-10-31 — Local secret store
+
+Memory may end up synced, so it must never hold secret values. It now holds `secret://<name>` references, and the values stay on the machine.
+
+**Added**
+- **`bin/memory-secrets.sh`.** One mode-600 file per secret in `${MEMORY_SECRETS_DIR:-${XDG_DATA_HOME:-~/.local/share}/agent-secrets}`, outside `~/.claude`. Commands: `put`, `list`, `has`, `rm`, `run`, `get`, `scan`, `adopt`, `guard`. Values come in through stdin only and are never printed to a pipe. They are protected by file permissions and are not encrypted at rest.
+- **`scan`** reports `file:line` and kind without the value. **`adopt`** moves a found value into the store and leaves a reference.
+- **`guard` PreToolUse hook** blocks Write, Edit, MultiEdit and redirecting Bash commands that would put a secret into a memory file. Detection is pattern-based, so a short or plain-word password can get through; the protocol rule still applies. Merge it from `settings.snippet.json`: `install.sh` warns if it is missing and never edits an existing `settings.json`.
+- **Protocol rule 9:** secrets never enter memory, in any layer.
+- **`tests/memory-secrets-test.sh`.**
+
+## v6.3.0 — 2026-06-30 — L2 size guardrail + rotation (state-driven distillation)
+
+The L2 distillation guarantee in the protocol was **event-driven**: it fired on a "task done" signal that, in real journaling use, never arrives — so `SESSION.md` grew without bound (observed: 280 KB / 1081 lines over a month), and since it's re-injected every session start and after every compact, that's a recurring ~70–90k-token tax. The only existing guardrail was time-based (`last_updated` staleness >24h), which a continuously-updated journal sidesteps by construction. This adds the missing **size axis** and makes distillation **state-driven** (triggered by a threshold checked mechanically every session) instead of event-driven.
+
+**Added**
+- **L2 size guardrail in `hooks/session-start.sh`.** Reads soft/hard byte limits from the new `~/.claude/.memory-config` and injects an escalating recommendation when `SESSION.md` crosses them: soft → "rotate at the next pause", hard → "rotate before continuing". The trigger is deterministic (in the hook); the action stays model-driven. Both tiers are nudges, not gates — neither evicts active state.
+- **`~/.claude/.memory-config`** (template `.memory-config.template`). Shell-sourced runtime config: `L2_SOFT_BYTES` (default 40000), `L2_HARD_BYTES` (default 80000), `L2_KEEP_ARCS` (default 2), `L2_ARCHIVE_BY_MONTH` (default 1). `0` disables a limit. Installed by `install.sh` and **preserved on upgrade** like `IDENTITY.md` (user data).
+- **`/memory rotate [--dry-run]`.** Lossless relocation of CLOSED dated arcs out of `SESSION.md` into a recallable archive (`SESSION.archive.YYYY-MM.md`, alongside `SESSION.md` so qmd indexes it), leaving a one-line stub + pointer. Structural sections (Goal/State/Open questions/Blockers) and active arcs are never moved; the most recent `L2_KEEP_ARCS` closed arcs stay inline. Model-driven (no brittle shell regex over the user's arc/status convention); refuses to truncate live state when nothing is eligible.
+
+**Fixed**
+- **Project-slug derivation was wrong on native Unix paths**, so the staleness check (and now the size guardrail) never found `SESSION.md` on Linux/macOS/WSL2. `hooks/session-start.sh` stripped the leading dash and left `.` unreplaced, computing `home-u-src-github.com-x` where Claude Code's real dir is `-home-u-src-github-com-x`. Now keeps the leading dash and replaces both `/` and `.` with `-` (matching the observed `~/.claude/projects/` naming); the Git-Bash drive-letter branch also replaces `.` now.
+
 ## v6.2.4 — 2026-05-28 — Cross-platform portability (installer ships what's actually in the tree)
 
 **Fixed**

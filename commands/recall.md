@@ -1,4 +1,8 @@
-# /recall — Hybrid search over Claude memory
+---
+description: Search memory across projects: past decisions, gotchas, notes. Use for "did we already see this?" or any question about earlier work.
+---
+
+# /recall — Hybrid search over memory
 
 Search across L0 identity, L1-fallback project notes, and L2 session memory using qmd (BM25 + GGUF embeddings + LLM rerank, all local).
 
@@ -9,9 +13,9 @@ Search across L0 identity, L1-fallback project notes, and L2 session memory usin
 `/recall --hybrid <query>` — full hybrid: BM25 + vector + LLM rerank. Requires `qmd embed` to be complete; loads ~2GB of GGUF models on first call of the session. Use when BM25 misses something obviously relevant.
 
 Optional flags:
-- `--here` — scope to current project's memory only (derive slug from cwd)
-- `-c <collection>` — scope to one collection (`claude-l0` or `claude-projects`)
-- `-k <N>` — top-N hits (default 5)
+- `--here` — scope to current project's memory only (key from `memory-3layer key`)
+- `-c <collection>` — scope to one collection
+- `-n <N>` — top-N hits (default 5)
 
 ## How to execute
 
@@ -19,18 +23,18 @@ Optional flags:
 
 2. **BM25 default** (no `--hybrid` flag):
    ```bash
-   qmd search "<USER_QUERY>" --md -k 5
+   memory-3layer search "<USER_QUERY>"
    ```
 
 3. **Hybrid mode** (with `--hybrid`):
    ```bash
-   qmd query "<USER_QUERY>" --rerank --md -k 5
+   qmd query "<USER_QUERY>" -c memory-3layer -n 5
    ```
    First call of the session takes 10-60s to load embedding/reranker/query-expansion models. Subsequent calls are fast.
 
 4. Scoping:
-   - `--here`: derive slug from cwd (`C--dev-...`), add `--filter "qmd://claude-projects/<slug>/**"`
-   - `-c <name>` / `-k <N>`: pass through to qmd
+   - `--here`: `memory-3layer search --here "<USER_QUERY>"`. It lists the ranked files of this project; read the ones that fit. qmd has no path filter, so hybrid mode can't be limited to one project.
+   - `-c <name>` / `-n <N>`: pass through to qmd
 
 5. Display qmd's markdown output verbatim. Do NOT paraphrase paths/snippets. After hits, add one short orientation line (e.g. "looks like the relevant note is in `air/SESSION.md`").
 
@@ -44,8 +48,7 @@ Optional flags:
 
 ## Collections available
 
-- `claude-l0` — `~/.claude/memory/IDENTITY.md` (env-wide creds, OS, prefs)
-- `claude-projects` — all `~/.claude/projects/*/memory/*.md` (project.md, SESSION.md, gotchas, topic files)
+- `memory-3layer` — everything under `memory-3layer path home`: identity, project.md, SESSION.md, archives, topic files
 
 ## When BM25 vs hybrid
 

@@ -1,3 +1,7 @@
+---
+description: Task manager for the memory subsystem: running processes, index progress, stalls. Use when qmd or node is using CPU.
+---
+
 # /memstat — Memory subsystem dispatcher ("task manager" for memory)
 
 Shows what the memory subsystem is doing right now: running processes (qmd embed/update, codemap/ctags), index progress (vectors embedded vs pending), refresh schedule, recent activity logs, and a health/stall check.

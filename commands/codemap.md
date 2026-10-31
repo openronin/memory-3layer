@@ -1,3 +1,7 @@
+---
+description: Symbol map for the current repository: where a symbol is defined, who calls it, what it calls, a file outline.
+---
+
 # /codemap — On-demand symbol map for the current repo
 
 Tree-sitter-ish symbol queries (definitions, callers, callees, outline) via universal-ctags + ripgrep. No daemon, no persistent DB outside the repo. Re-scans automatically if source files are newer than the cached `.codemap.tags`.
