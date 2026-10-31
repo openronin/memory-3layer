@@ -80,9 +80,9 @@ Injected, so it can't be skipped:
 
 After a compaction, the state of the task bound to this session is added. An unbound session picks a task with `task resume`, or opens one.
 
-`# Brief` runs from that heading to the next first-level heading. It is limited to `CORE_BRIEF_BYTES`, 2000 by default. Past that it is cut, and the agent is told so and asked to shorten it. If there is no brief, the agent is asked to read the file.
+`# Brief` runs from that heading to the next first-level heading. It is limited to `CORE_BRIEF_BYTES`, 5000 by default. Past that it is cut, and the agent is told so and asked to shorten it. If there is no brief, the agent is asked to read the file.
 
-Size warnings on `CORE.md` start much lower than those on `SESSION.md`, at 8 KB and 16 KB, because working state no longer lives there.
+Size warnings on `CORE.md` fire at 20 KB and 40 KB, half of those on `SESSION.md`, because working state no longer lives there.
 
 ## Sync
 
@@ -120,5 +120,5 @@ After two weeks of real work on this repository:
 ## Open
 
 - Verbatim recent turns: a hook would do this mechanically, but that bypasses "the agent writes the memory". Left out of the first version; `CORE.md` and journals have to show whether they're missed.
-- Search over tasks and archives: review before the code, because it depends on the archive format.
+- Search over tasks and archives: a separate review after the first version. Journals and archives are plain markdown, so qmd indexes them as they are.
 - Codex: session id and hook behaviour are unverified.
