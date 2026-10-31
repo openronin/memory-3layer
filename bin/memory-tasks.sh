@@ -121,6 +121,8 @@ index() {
       slug=${f##*/}; slug=${slug%.md}
       IFS=$'\x1f' read -r status last goal nx bl < <(summary "$f" | tr '\t' '\037')
       text=$nx; [[ "$status" == blocked ]] && text=$bl; [[ -n "$text" ]] || text=$goal
+      # One line each: the index is for choosing, and `task show` has the whole text.
+      [[ ${#text} -le 100 ]] || text="${text:0:100}..."
       days=$(age_days "$last")
       [[ "$days" -ge "$STALE_DAYS" ]] && status="stale, ${days}d"
       printf '  %s [%s] %s\n' "$slug" "$status" "$text"

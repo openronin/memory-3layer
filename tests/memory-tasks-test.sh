@@ -82,6 +82,9 @@ hasnt "show: old blocker is gone" "$out" "Blocker"
 hasnt "show: notes stay in the log" "$out" "just a note"
 has "show --log has everything" "$(m task show ship --log)" "just a note"
 
+python3 -c 'print("длинный текст " * 30)' | m task log ship next
+ok "index line is short" "$(m state | grep -c '\.\.\.$')" 1
+echo "tag it" | m task log ship next
 # --- what the journal refuses ---
 before=$(wc -c < "$J/ship.md")
 echo "token $FAKE" | m task log ship note >/dev/null 2>"$T/err"; ok "secret refused" $? 2
