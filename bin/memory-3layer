@@ -128,7 +128,10 @@ project_key() {
   if [[ -n "$url" ]] && key=$(normalize_remote "$url"); then
     :
   else
-    key="local/${root#"$HOME"/}"; key=${key//\/\//\/}
+    # git prints a physical path, and $HOME may go through a symlink.
+    key=${root#"$HOME"/}
+    [[ "$key" != "$root" ]] || key=${root#"$(cd "$HOME" 2>/dev/null && pwd -P)"/}
+    key="local/$key"; key=${key//\/\//\/}
   fi
   case "/$key/" in */../*|*/./*) die "unsafe project key: $key" ;; esac
   follow_redirect "$key"
