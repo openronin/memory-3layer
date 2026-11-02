@@ -2,6 +2,12 @@
 
 Find your version with `claude plugin list`, or in `CHANGELOG.md` of your copy. Older versions have no plugin: if memory is in `~/.claude`, you are on 6.x or earlier.
 
+## 7.1.0 to 7.1.1
+
+Update the plugin. On macOS, also run `brew install bash`: sync needs it.
+
+If `$HOME` goes through a symlink, a project with no remote gets a shorter key. Its memory stays under the old one, so move it with `memory-3layer rekey <old> <new>`. `memory-3layer key` prints the new key, and `memory-3layer projects` lists the old one.
+
 ## 7.0 to 7.1
 
 Update the plugin: see [INSTALL.md](../INSTALL.md#claude-code-plugin). Data and settings stay as they are.

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v7.1.1 — 2026-11-02 — macOS support
 
 - macOS: dates, timeouts and `/memstat` work without GNU tools. Sync and `migrate` need bash 4 (`brew install bash`), find it by themselves, and say so when it is missing. Based on a report and fixes by @gorlitsyn.
 - Fixed: when the home directory went through a symlink, the guard missed a secret in an `apply_patch` to a data directory file with no standard memory name, and a project with no remote got a different key.
