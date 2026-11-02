@@ -373,5 +373,62 @@ mk jd "$JK/_tasks/m.md" "$(rec 2026-01-01T00:00:03Z-dddd note 'from d')"
 on jd sync --quiet
 ok "first sync joins a journal" "$(grep -c '^## ' "$(data jd)/$JK/_tasks/m.md")" 4
 
+# --- a session writes while a sync runs ---
+# A git shim makes the write land between copy_out and copy_in.
+RS=$(bare race); RK=projects/github.com/o/race
+mkdir -p "$T/ra" "$T/rb" "$T/shim"; for m in ra rb; do mkdir -p "$(dirname "$(conf $m)")"; printf 'default = %s\n' "$RS" > "$(conf $m)"; done
+REAL_GIT=$(command -v git)
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'if [[ " $* " == *" merge "* && -n "${RACE_FILE:-}" && ! -e "$RACE_FILE.done" ]]; then\n'
+  printf '  : > "$RACE_FILE.done"; printf "%%s\\n" "$RACE_TEXT" >> "$RACE_FILE"\nfi\n'
+  printf 'exec "%s" "$@"\n' "$REAL_GIT"
+} > "$T/shim/git"
+chmod +x "$T/shim/git"
+raced() { RACE_FILE="$(data ra)/$1" RACE_TEXT="$2" PATH="$T/shim:$PATH" on ra sync --quiet; rm -f "$(data ra)/$1.done"; }
+mk ra "$RK/_tasks/t.md" "$(rec 2026-01-01T00:00:01Z-aaaa open 'goal')"
+mk ra "$RK/CORE.md" "core one"
+on ra sync --quiet
+raced "$RK/_tasks/t.md" "$(rec 2026-01-01T00:00:02Z-bbbb note 'written during sync')"
+ok "race: journal record survives" "$(grep -c 'written during sync' "$(data ra)/$RK/_tasks/t.md")" 1
+on ra sync --quiet; on rb sync --quiet
+ok "race: it reaches the other machine" "$(grep -c 'written during sync' "$(data rb)/$RK/_tasks/t.md")" 1
+raced "$RK/CORE.md" "edit during sync"
+ok "race: CORE edit survives" "$(grep -c 'edit during sync' "$(data ra)/$RK/CORE.md")" 1
+on ra sync --quiet; on rb sync --quiet
+# Both sides changed: the other machine's record and a record written during the sync.
+printf '%s\n' "$(rec 2026-01-01T00:00:03Z-cccc note 'from b')" >> "$(data rb)/$RK/_tasks/t.md"; on rb sync --quiet
+raced "$RK/_tasks/t.md" "$(rec 2026-01-01T00:00:04Z-dddd note 'local during merge')"
+ok "race: remote record arrives" "$(grep -c 'from b' "$(data ra)/$RK/_tasks/t.md")" 1
+ok "race: local record kept beside it" "$(grep -c 'local during merge' "$(data ra)/$RK/_tasks/t.md")" 1
+on ra sync --quiet; on rb sync --quiet
+printf 'core from b\n' > "$(data rb)/$RK/CORE.md"; on rb sync --quiet
+raced "$RK/CORE.md" "core local during merge"
+ok "race: local CORE keeps the name" "$(grep -c 'core local during merge' "$(data ra)/$RK/CORE.md")" 1
+ok "race: remote CORE kept beside it" "$(cat "$(data ra)/$RK/superseded/conflict-remote/CORE.md")" "core from b"
+
+# --- tick ---
+waitsync() { local i; for i in $(seq 1 50); do [[ -z "$(find "$T/$1" -name '*.lock' 2>/dev/null)" ]] && return; sleep 0.1; done; }
+stamp_time() { stat -c %Y "$TL" 2>/dev/null || stat -f %m "$TL"; }
+TS=$(bare tick); TK=projects/github.com/o/tick; TL="$T/ta/.local/state/memory-3layer/last-sync"
+mkdir -p "$T/ta" "$T/tn"; mkdir -p "$(dirname "$(conf ta)")"; printf 'default = %s\n' "$TS" > "$(conf ta)"
+pushed() { git -C "$TS" log --oneline 2>/dev/null | wc -l | tr -d ' '; }
+on tn sync tick; ok "tick: no storage does nothing" "$?:$(test -e "$T/tn/.local/state/memory-3layer/stores"; echo $?)" "0:1"
+mk ta "$TK/CORE.md" "one"
+on ta sync tick; sleep 0.3; waitsync ta
+ok "tick: first run syncs" "$(pushed)" 1
+sleep 1.1; mk ta "$TK/CORE.md" "two"
+on ta sync tick 3600; sleep 0.3; waitsync ta
+ok "tick: a recent sync holds it back" "$(pushed)" 1
+on ta sync tick; sleep 0.3; waitsync ta
+ok "tick: a change goes out" "$(pushed)" 2
+sleep 1.1; on ta sync tick; sleep 0.3; waitsync ta; before=$(stamp_time); sleep 1.1
+on ta sync tick; sleep 0.2
+ok "tick: nothing changed, nothing runs" "$(stamp_time)" "$before"
+MEMORY_3LAYER_TICK_SECONDS=0 on ta sync tick; sleep 0.3; waitsync ta
+case "$(stamp_time)" in "$before") r=n ;; *) r=y ;; esac; ok "tick: runs anyway when the period is over" $r y
+ok "tick: prints nothing" "$(on ta sync tick 2>&1)" ""
+sleep 0.3; waitsync ta
+
 echo; [[ $fail -eq 0 ]] && echo "all $n passed" || echo "FAILED"
 exit $fail

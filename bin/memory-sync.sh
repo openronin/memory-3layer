@@ -19,6 +19,8 @@ HOST=$(hostname -s 2>/dev/null || echo unknown)
 MODE=full
 QUIET=0
 NET_TIMEOUT=30
+# With no changes of its own, a tick still syncs this often, to bring in other machines' work.
+TICK_SECONDS=${MEMORY_3LAYER_TICK_SECONDS:-300}
 
 declare -A RULE=()
 declare -A ACCESS=()
@@ -190,7 +192,8 @@ mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; 
 
 put() {
   # put <source> <destination>
-  mkdir -p "${2%/*}" && cp -p "$1" "$2"
+  # Through a temp file, so a session reading the destination never sees half of it.
+  mkdir -p "${2%/*}" && cp -p "$1" "$2.$$.tmp" && mv -f "$2.$$.tmp" "$2"
 }
 
 routed_files() {
@@ -368,6 +371,25 @@ merge_remote() {
   g merge -q --no-edit "origin/$BRANCH" >/dev/null 2>&1 || resolve_conflicts
 }
 
+keep_local_write() {
+  # keep_local_write <path> <commit before the merge>. Sessions keep writing while a sync
+  # runs. Succeeds if the data dir has a write made after copy_out and it has been kept;
+  # it reaches the storage at the next sync.
+  local p=$1 pre=$2 before after here merged
+  before=$(git -C "$CLONE" rev-parse -q --verify "$pre:$p" 2>/dev/null || true)
+  after=$(git -C "$CLONE" rev-parse -q --verify "HEAD:$p" 2>/dev/null || true)
+  [[ "$before" == "$after" ]] && return 0
+  here=$(git -C "$CLONE" hash-object --no-filters "$DATA/$p")
+  [[ "$here" == "$before" ]] && return 1
+  if is_journal "$p"; then
+    merged="$DATA/$p.$$.tmp"
+    merge_journals "$DATA/$p" "$CLONE/$p" > "$merged" && mv -f "$merged" "$DATA/$p"
+  else
+    put "$CLONE/$p" "$DATA/$(loser_path "$p" remote)"
+  fi
+  return 0
+}
+
 copy_in() {
   # Clone -> data dir, for files routed here. A file held back for a secret keeps its
   # local version, otherwise the older remote copy would overwrite it.
@@ -384,7 +406,11 @@ copy_in() {
     fi
     [[ -n "${SKIPPED[$p]:-}" ]] && continue
     [[ "$(route_path "$p")" == "$addr" ]] || continue
-    cmp -s "$CLONE/$p" "$DATA/$p" 2>/dev/null || put "$CLONE/$p" "$DATA/$p"
+    cmp -s "$CLONE/$p" "$DATA/$p" 2>/dev/null && continue
+    if [[ -n "$pre" && -f "$DATA/$p" ]]; then
+      keep_local_write "$p" "$pre" && continue
+    fi
+    put "$CLONE/$p" "$DATA/$p"
   done < <(git -C "$CLONE" ls-files)
   if [[ -n "$pre" ]]; then
     while IFS= read -r p; do
@@ -487,6 +513,7 @@ sync_store() {
 
 cmd_sync() {
   local failed=0 addr
+  [[ "$MODE" == pull ]] || { mkdir -p "$STATE"; touch "$STATE/last-sync"; }
   load_conf
   mapfile -t stores < <(all_stores)
   if [[ ${#stores[@]} -eq 0 ]]; then
@@ -501,6 +528,27 @@ cmd_sync() {
     sync_store "$addr" || failed=1
   done
   return $failed
+}
+
+cmd_tick() {
+  # tick [seconds]: for hooks that fire often. Decides quickly and syncs in the background:
+  # memory changed and the last sync is at least <seconds> old, or the last sync is older
+  # than TICK_SECONDS. Whatever one sync misses, the next full one sends. It runs on every
+  # tool call, so the common answer comes before reading the configuration, which is slow.
+  local min=${1:-0} stamp="$STATE/last-sync" age
+  if [[ -f "$stamp" ]]; then
+    age=$(( $(date +%s) - $(mtime "$stamp") ))
+    if (( age < TICK_SECONDS )); then
+      (( age >= min )) || return 0
+      [[ -n "$(find "$DATA" -newer "$stamp" -print -quit 2>/dev/null)" ]] || return 0
+    fi
+  fi
+  mkdir -p "$STATE"; touch "$stamp"
+  load_conf
+  [[ -n "$(all_stores)" ]] || return 0
+  nohup bash "$SELF_DIR/memory-sync.sh" --quiet >/dev/null 2>&1 </dev/null &
+  disown 2>/dev/null
+  return 0
 }
 
 cmd_init() {
@@ -633,12 +681,13 @@ case "$sub" in
   status) cmd_status ;;
   route) shift; cmd_route "$@" ;;
   check) cmd_check ;;
+  tick) shift; cmd_tick "$@" ;;
   *)
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --pull) MODE=pull; NET_TIMEOUT=5 ;;
         --quiet) QUIET=1 ;;
-        *) echo "usage: sync [--pull] [--quiet] | init <address> | status | check | route [key]" >&2; exit 2 ;;
+        *) echo "usage: sync [--pull] [--quiet] | tick [seconds] | init <address> | status | check | route [key]" >&2; exit 2 ;;
       esac
       shift
     done

@@ -8,7 +8,7 @@ Memory for coding agents that lives in plain markdown files, outside any agent. 
 
 An agent loses its context on every compaction, new session and new machine. A harness's built-in memory stays with that harness on that machine. This tool keeps the memory in files you can read, diff and sync with git.
 
-Nothing is captured automatically. The agent keeps its working state as it goes, and a fact becomes long-term memory only when you say so.
+The agent writes the memory, not the hooks: actions aren't recorded mechanically. It keeps working memory (`SESSION.md`, one file per repository, shared by all its sessions) without being asked, so work continues after a compaction and in a new session. A fact reaches permanent memory (`IDENTITY.md`, `project.md`, the repo's docs) only when you say so.
 
 ## How it works
 
@@ -33,6 +33,7 @@ Hooks do the mechanical part:
 |---|---|
 | Session start | Pull from storages, tell the agent what to read, warn if `SESSION.md` is stale or too large |
 | Before a tool runs | Block a secret from being written to memory, allow writes to the memory directory |
+| End of a turn, after a tool call | Sync in the background if memory changed, or every 5 minutes |
 | Before compaction | Remind the agent to save its state, push in the background |
 | Session end | Push in the background |
 

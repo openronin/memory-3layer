@@ -96,10 +96,16 @@ Triggers:
 | When | What | If it fails |
 |---|---|---|
 | Session start | pull, limited to a few seconds | start with local data, say so |
+| End of each agent turn | in the background, if memory changed or the last sync is over 5 minutes old | retried at the next trigger |
+| After a tool call | the same, at most once a minute, for long turns | retried at the next trigger |
 | Before compaction, session end | commit and push in the background | retried at the next trigger |
 | `memory-3layer sync` | everything, in the foreground | reported per storage |
 
 A harness with no suitable hook relies on the session start of the next session, or on the command.
+
+A running session sees another machine's changes when it next reads a file. The context injected at its start isn't refreshed.
+
+A session can write while a sync runs. A write made after the sync copied the file out stays in the data directory and goes out with the next sync.
 
 ## Conflicts
 
