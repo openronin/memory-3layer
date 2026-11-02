@@ -2,6 +2,10 @@
 
 Find your version with `claude plugin list`, or in `CHANGELOG.md` of your copy. Older versions have no plugin: if memory is in `~/.claude`, you are on 6.x or earlier.
 
+## 7.1.1 to 7.1.2
+
+Update the plugin. The next `/memory rotate` folds existing `→ archived` stubs into one line per archive file.
+
 ## 7.1.0 to 7.1.1
 
 Update the plugin. On macOS, also run `brew install bash`: sync needs it.
