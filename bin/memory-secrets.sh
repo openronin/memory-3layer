@@ -125,7 +125,7 @@ default_paths() {
 cmd_scan() {
   local found=0 f p ln kind v
   local -a paths=()
-  if [[ $# -gt 0 ]]; then paths=("$@"); else mapfile -t paths < <(default_paths); fi
+  if [[ $# -gt 0 ]]; then paths=("$@"); else while IFS= read -r f; do paths+=("$f"); done < <(default_paths); fi
   [[ ${#paths[@]} -gt 0 ]] || return 0
   while IFS= read -r f; do
     while IFS=$'\t' read -r ln kind v; do
