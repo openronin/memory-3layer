@@ -1,10 +1,17 @@
 # Changelog
 
+## v7.1.1 — 2026-11-02 — macOS support
+
+- macOS: dates, timeouts and `/memstat` work without GNU tools. Sync and `migrate` need bash 4 (`brew install bash`), find it by themselves, and say so when it is missing. Based on a report and fixes by @gorlitsyn.
+- Fixed: when the home directory went through a symlink, the guard missed a secret in an `apply_patch` to a data directory file with no standard memory name, and a project with no remote got a different key.
+
 ## v7.1.0 — 2026-10-31 — Codex package
 
 - Codex CLI plugin, built from its documentation. Not yet run on a real Codex: see `docs/codex.md`.
 - The guard reads `apply_patch` patches.
 - Documentation rewritten for the current layout. Upgrade steps are in `docs/migration.md`.
+- Fixed: the guard missed a secret appended with `>>` to a data directory file with no standard memory name.
+- Fixed: a write to memory made while a sync was running could be overwritten.
 
 ## v7.0.0 — 2026-10-31 — Harness-independent memory, sync, plugin
 

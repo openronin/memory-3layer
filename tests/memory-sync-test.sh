@@ -4,7 +4,7 @@
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$REPO/bin/memory-3layer"
-T=$(mktemp -d)
+T=$(cd "$(mktemp -d)" && pwd -P)
 # Hooks start background syncs, which must finish before the temp dir goes away.
 cleanup() { local i; [[ -n "${HTTP_PID:-}" ]] && kill "$HTTP_PID" 2>/dev/null; for i in $(seq 1 50); do [[ -z "$(find "$T" -name '*.lock' 2>/dev/null)" ]] && break; sleep 0.2; done; sleep 0.3; rm -rf "$T"; }
 trap cleanup EXIT
@@ -62,7 +62,7 @@ ok "deletion leaves other files" "$(rd b "$K/project.md")" "facts 2"
 
 # --- merge and conflict ---
 printf 'one\ntwo\nthree\nfour\nfive\nsix\nseven\n' > "$(data a)/$K/notes.md"; on a sync --quiet; on b sync --quiet
-sed -i 's/one/ONE/' "$(data a)/$K/notes.md"; sed -i 's/seven/SEVEN/' "$(data b)/$K/notes.md"
+sed -i.bak 's/one/ONE/' "$(data a)/$K/notes.md"; rm "$(data a)/$K/notes.md.bak"; sed -i.bak 's/seven/SEVEN/' "$(data b)/$K/notes.md"; rm "$(data b)/$K/notes.md.bak"
 on a sync --quiet; on b sync --quiet; on a sync --quiet
 ok "git merges different parts" "$(sed -n '1p;7p' "$(data a)/$K/notes.md" | tr '\n' ' ')" "ONE SEVEN "
 ok "merge reaches both" "$(md5sum < "$(data a)/$K/notes.md")" "$(md5sum < "$(data b)/$K/notes.md")"
@@ -81,7 +81,7 @@ case "$(cd "$T" && mkdir -p r && git -C r init -q 2>/dev/null; git -C r remote a
 S2=$(bare first)
 mk c "$K/x.md" "from c"
 HOME="$T/c" bash "$BIN" sync init "$S2" >/dev/null; on c sync --quiet
-mkdir -p "$T/d"; mk d "$K/x.md" "from d"; touch -d '2020-01-01' "$(data d)/$K/x.md"
+mkdir -p "$T/d"; mk d "$K/x.md" "from d"; touch -t 202001010000 "$(data d)/$K/x.md"
 on d sync init "$S2" >/dev/null; on d sync --quiet
 ok "first sync: newer stays" "$(rd d "$K/x.md")" "from c"
 ok "first sync: other version kept" "$(cat "$(find "$(data d)/$K/superseded" -name x.md)")" "from d"

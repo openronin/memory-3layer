@@ -2,7 +2,7 @@
 # Tests for packaging and publishing. Packages go to temp dirs, the package repository is a temp bare one.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+T=$(cd "$(mktemp -d)" && pwd -P); trap 'rm -rf "$T"' EXIT
 fail=0; n=0
 ok() { n=$((n+1)); if [[ "$2" == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: expected [$3], got [$2]"; fail=1; fi; }
 P=$T/p
@@ -55,6 +55,8 @@ ok "patch: secret into memory blocked" "$(patch "Update File: $H/projects/a/SESS
 case "$(cat "$T/err")" in *"$FAKE"*) r=leak ;; *BLOCKED*) r=clean ;; *) r=none ;; esac; ok "patch: message hides the value" $r clean
 ok "patch: new file blocked too" "$(patch "Add File: $H/projects/a/notes.md" "$FAKE" | g)" "rc=2"
 ok "patch: relative path resolved" "$(patch "Update File: projects/a/x.md" "$FAKE" "$H" | g)" "rc=2"
+ln -s "$T/h" "$T/linked"
+ok "patch: home through a symlink" "$(patch "Add File: $T/linked/.local/share/memory-3layer/projects/a/notes.md" "$FAKE" | HOME="$T/linked" bash "$Q/bin/memory-3layer" guard 2>/dev/null; echo "rc=$?")" "rc=2"
 ok "patch: clean memory write passes silently" "$(patch "Update File: $H/projects/a/SESSION.md" "state" | g)" "rc=0"
 ok "patch: secret outside memory isn't its business" "$(patch "Update File: $T/src/a.py" "$FAKE" | g)" "rc=0"
 ok "shell: secret into memory blocked" "$(python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":"echo "+sys.argv[1]+" >> "+sys.argv[2]}}))' "$FAKE" "$H/projects/a/SESSION.md" | g)" "rc=2"
