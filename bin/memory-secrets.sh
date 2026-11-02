@@ -178,7 +178,7 @@ bash_writes_memory() {
   # mentioning a memory path, as a test fixture does, is not a write.
   local text=$1 word line
   while IFS= read -r word; do
-    word=${word#*>}; word=${word#tee}; word=${word# -a}
+    word=${word##*>}; word=${word#tee}; word=${word# -a}
     word=$(printf '%s' "$word" | sed -E "s/^[[:space:]]+//; s/[\"']//g")
     is_memory_path "$word" && return 0
   done < <(printf '%s\n' "$text" | grep -oE "(>>?|tee( -a)?)[[:space:]]*[\"']?[^[:space:]\"'|;&]+" || true)

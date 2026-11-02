@@ -333,5 +333,29 @@ ok "session hook still answers in JSON" "$(printf '%s' "$out" | python3 -c 'impo
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do git -C "$V" cat-file -e main:$K/project.md 2>/dev/null && break; sleep 0.3; done
 ok "session end pushes in the background" "$(has "$V" "$K/project.md")" 0
 
+# --- a session writes while a sync runs ---
+# A git shim makes the write land between copy_out and copy_in.
+RS=$(bare race); RK=projects/github.com/o/race
+mkdir -p "$T/ra" "$T/rb" "$T/shim"; for m in ra rb; do mkdir -p "$(dirname "$(conf $m)")"; printf 'default = %s\n' "$RS" > "$(conf $m)"; done
+REAL_GIT=$(command -v git)
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'if [[ " $* " == *" merge "* && -n "${RACE_FILE:-}" && ! -e "$RACE_FILE.done" ]]; then\n'
+  printf '  : > "$RACE_FILE.done"; printf "%%s\\n" "$RACE_TEXT" >> "$RACE_FILE"\nfi\n'
+  printf 'exec "%s" "$@"\n' "$REAL_GIT"
+} > "$T/shim/git"
+chmod +x "$T/shim/git"
+raced() { RACE_FILE="$(data ra)/$1" RACE_TEXT="$2" PATH="$T/shim:$PATH" on ra sync --quiet; rm -f "$(data ra)/$1.done"; }
+mk ra "$RK/SESSION.md" "one"
+on ra sync --quiet
+raced "$RK/SESSION.md" "edit during sync"
+ok "race: a write during sync survives" "$(grep -c 'edit during sync' "$(data ra)/$RK/SESSION.md")" 1
+on ra sync --quiet; on rb sync --quiet
+ok "race: it reaches the other machine" "$(grep -c 'edit during sync' "$(data rb)/$RK/SESSION.md")" 1
+printf 'from b\n' > "$(data rb)/$RK/SESSION.md"; on rb sync --quiet
+raced "$RK/SESSION.md" "local during merge"
+ok "race: local version keeps the name" "$(grep -c 'local during merge' "$(data ra)/$RK/SESSION.md")" 1
+ok "race: remote version kept beside it" "$(cat "$(data ra)/$RK/superseded/conflict-remote/SESSION.md")" "from b"
+
 echo; [[ $fail -eq 0 ]] && echo "all $n passed" || echo "FAILED"
 exit $fail

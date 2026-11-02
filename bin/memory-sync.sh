@@ -175,7 +175,8 @@ mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; 
 
 put() {
   # put <source> <destination>
-  mkdir -p "${2%/*}" && cp -p "$1" "$2"
+  # Through a temp file, so a session reading the destination never sees half of it.
+  mkdir -p "${2%/*}" && cp -p "$1" "$2.$$.tmp" && mv -f "$2.$$.tmp" "$2"
 }
 
 routed_files() {
@@ -347,6 +348,20 @@ merge_remote() {
   g merge -q --no-edit "origin/$BRANCH" >/dev/null 2>&1 || resolve_conflicts
 }
 
+keep_local_write() {
+  # keep_local_write <path> <commit before the merge>. Sessions keep writing while a sync
+  # runs. Succeeds if the data dir has a write made after copy_out and it has been kept;
+  # it reaches the storage at the next sync.
+  local p=$1 pre=$2 before after here
+  before=$(git -C "$CLONE" rev-parse -q --verify "$pre:$p" 2>/dev/null || true)
+  after=$(git -C "$CLONE" rev-parse -q --verify "HEAD:$p" 2>/dev/null || true)
+  [[ "$before" == "$after" ]] && return 0
+  here=$(git -C "$CLONE" hash-object --no-filters "$DATA/$p")
+  [[ "$here" == "$before" ]] && return 1
+  put "$CLONE/$p" "$DATA/$(loser_path "$p" remote)"
+  return 0
+}
+
 copy_in() {
   # Clone -> data dir, for files routed here. A file held back for a secret keeps its
   # local version, otherwise the older remote copy would overwrite it.
@@ -363,7 +378,11 @@ copy_in() {
     fi
     [[ -n "${SKIPPED[$p]:-}" ]] && continue
     [[ "$(route_path "$p")" == "$addr" ]] || continue
-    cmp -s "$CLONE/$p" "$DATA/$p" 2>/dev/null || put "$CLONE/$p" "$DATA/$p"
+    cmp -s "$CLONE/$p" "$DATA/$p" 2>/dev/null && continue
+    if [[ -n "$pre" && -f "$DATA/$p" ]]; then
+      keep_local_write "$p" "$pre" && continue
+    fi
+    put "$CLONE/$p" "$DATA/$p"
   done < <(git -C "$CLONE" ls-files)
   if [[ -n "$pre" ]]; then
     while IFS= read -r p; do

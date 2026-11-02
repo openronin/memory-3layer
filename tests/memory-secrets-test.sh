@@ -94,6 +94,7 @@ url $GH in $M/SESSION.md
 X")")" 0
 ok "guard blocks sed -i on memory" "$(g Bash "$(J command "sed -i s/a/$GH/ $M/SESSION.md")")" 2
 ok "guard blocks tee on memory" "$(g Bash "$(J command "echo $GH | tee -a $M/SESSION.md")")" 2
+ok "guard blocks an append to any file in the data dir" "$(g Bash "$(J command "echo $GH >> $T/data/projects/a/notes.md")")" 2
 # Approval of the data dir
 dec() { gj "$1" "$2" | ms guard 2>/dev/null | python3 -c 'import json,sys; s=sys.stdin.read(); print(json.loads(s)["hookSpecificOutput"]["permissionDecision"] if s.strip() else "none")'; }
 mkdir -p "$T/data/p" "$T/outside"; ln -s "$T/outside" "$T/data/link"

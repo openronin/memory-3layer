@@ -101,6 +101,8 @@ Triggers:
 
 A harness with no suitable hook relies on the session start of the next session, or on the command.
 
+A session can write while a sync runs. A write made after the sync copied the file out stays in the data directory and goes out with the next sync.
+
 ## Conflicts
 
 One repo has one L2, so two machines can change the same `SESSION.md`.
