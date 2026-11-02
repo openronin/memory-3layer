@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v7.1.2 — 2026-11-02 — Shorter SESSION.md, fewer needless questions
 
 - Rotation keeps one line per archive file in `SESSION.md` instead of a stub per arc, and folds existing stubs at the next `/memory rotate`.
 - The stale `SESSION.md` warning no longer makes the agent ask "continue or reset" before answering a question unrelated to it.
