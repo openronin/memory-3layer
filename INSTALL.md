@@ -2,10 +2,10 @@
 
 ## Requirements
 
-- bash, git, GNU `date`. The staleness warning needs GNU `date`, which macOS provides through `brew install coreutils`.
+- bash 4 or newer, and git. macOS ships bash 3.2, so run `brew install bash` there. The client finds Homebrew's bash by itself. Without it, sync and `migrate` refuse to run and the session context says so.
 - python3, for the secret guard and for `migrate` and `import`. Without it the guard lets writes through.
 
-Tests run on Linux, and daily use is on Linux and WSL2.
+Tests run on Linux and macOS. Daily use is on Linux and WSL2.
 
 ## Claude Code plugin
 

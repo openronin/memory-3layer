@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- macOS: dates, timeouts and `/memstat` work without GNU tools. Sync and `migrate` need bash 4 (`brew install bash`), find it by themselves, and say so when it is missing. Based on a report and fixes by @gorlitsyn.
+
 ## v7.1.0 — 2026-10-31 — Codex package
 
 - Codex CLI plugin, built from its documentation. Not yet run on a real Codex: see `docs/codex.md`.

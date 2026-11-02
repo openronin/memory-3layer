@@ -1,0 +1,43 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash 4 on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+      - name: tests
+        run: |
+          bash --version | head -1
+          git config --global user.name ci
+          git config --global user.email ci@example.com
+          rc=0
+          for t in tests/*-test.sh; do bash "$t" || rc=1; done
+          exit $rc
+      - name: memstat renders
+        run: |
+          out=$(bash bin/memstat.sh)
+          printf '%s\n' "$out"
+          case "$out" in *PROCESSES*) ;; *) exit 1 ;; esac
+      - name: stock bash keeps the session working
+        if: runner.os == 'macOS'
+        run: |
+          /bin/bash --version | head -1
+          echo '{}' | /bin/bash bin/memory-3layer context | head -1 | grep -q MEMORY-3LAYER
+          echo '{"tool_name":"Bash","tool_input":{"command":"echo ok"}}' | /bin/bash bin/memory-3layer guard
