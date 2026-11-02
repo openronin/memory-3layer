@@ -40,7 +40,7 @@ Types: `open`, `note`, `decision`, `next`, `blocker`, `close`. Task state is com
 
 - status: `done` after `close`; `blocked` if a `blocker` is the latest of `blocker` and `next`; otherwise `active`;
 - stale: no record for `TASK_STALE_DAYS`, 7 by default;
-- next step: the latest `next`.
+- next step: the latest `next`. When it is older than `TASK_NEXT_STALE_DAYS`, 3 by default, the index says so (`next 4d old`) and `task show` asks to check it: an agent that did the work and did not log it is the common case.
 
 ## Commands
 
@@ -49,9 +49,11 @@ The body always comes through stdin, so an agent can't trip over quoting.
     memory-3layer task open <slug>              # stdin: the goal
     memory-3layer task log <slug> <type>        # stdin: the record
     memory-3layer task resume <slug>            # bind this session, print the task's state
-    memory-3layer task show <slug> [--log]      # state, or the whole journal
+    memory-3layer task show <slug>              # state: goal, next, decisions, the last TASK_SHOW_NOTES notes (2), each cut at TASK_SHOW_NOTE_CHARS (1500)
+    memory-3layer task show <slug> --log        # the whole journal
+    memory-3layer task show <slug> --brief      # one line, as in the index
     memory-3layer task close <slug>             # stdin: the result, required
-    memory-3layer state                         # index: active and recent tasks
+    memory-3layer state                         # index: active and recent tasks (task list is the same)
     memory-3layer core stash <title>            # stdin: text to archive; prints a link to leave in its place
 
 Each write takes a lock, scans the body for secrets, and refuses the whole record on a finding.

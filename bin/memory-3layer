@@ -209,7 +209,7 @@ TEXT
 Client: $SELF_DIR/memory-3layer. Rules: the protocol skill, or CLAUDE.md.
 
 Work with more than one step, or that can outlive this session, is a task. Pass the text on stdin:
-  memory-3layer task open <name> | task resume <name> | task show <name> [--log]
+  memory-3layer task open <name> | task resume <name> | task show <name> [--log|--brief] | task list
   memory-3layer task log <name> note|decision|next|blocker | task close <name>
 Journals are written only through these commands. Keep next current as you work.
 $pd/CORE.md is yours to edit freely: live extracts worth keeping, with the most important in its # Brief block. Before closing a task, move what must outlive it there. Never write a secret value into memory; write secret://<name>.
@@ -519,8 +519,8 @@ memory-3layer — agent memory that belongs to no harness
   refresh [--debounce]                          rebuild the search index
   guard                                         PreToolUse hook: block secrets, allow the data dir
   secret <command>                              local secret store: put, list, run, scan...
-  task open|log|resume|show|close|redact        task journals: docs/tasks.md
-  state                                         active and recently closed tasks
+  task open|log|resume|show|list|close|redact   task journals: docs/tasks.md
+  state                                         active and recently closed tasks (same as task list)
   core init | stash <title> | brief             CORE.md: put a project on it, archive a part, see the brief
 USAGE
 }

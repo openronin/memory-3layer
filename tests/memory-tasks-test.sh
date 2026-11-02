@@ -79,8 +79,18 @@ has "show: goal" "$out" "Goal: Ship the thing"
 has "show: next" "$out" "Next: tag it"
 has "show: decision" "$out" "Use tags: simple"
 hasnt "show: old blocker is gone" "$out" "Blocker"
-hasnt "show: notes stay in the log" "$out" "just a note"
+has "show: the last note" "$out" "- 20"
+has "show: note text" "$out" ": just a note"
+echo "second note" | m task log ship note; echo "third note" | m task log ship note
+out=$(m task show ship)
+has "show: only the last notes" "$out" "Last 2 notes of 3:"
+hasnt "show: older notes stay in the log" "$out" "just a note"
 has "show --log has everything" "$(m task show ship --log)" "just a note"
+python3 -c 'print("n" * 2000)' | m task log ship note
+has "show: a long note is cut" "$(m task show ship)" "... (the whole note is in --log)"
+has "show --brief is the index line" "$(m task show ship --brief)" "ship [active] tag it"
+m task show ship --bogus >/dev/null 2>&1; ok "show: unknown flag refused" $? 2
+ok "task list is state" "$(m task list)" "$(m state)"
 
 python3 -c 'print("длинный текст " * 30)' | m task log ship next
 ok "index line is short" "$(m state | grep -c '\.\.\.$')" 1
@@ -119,6 +129,13 @@ has "pre-compact hook knows the format" "$(bash "$REPO/hooks/pre-compact.sh")" "
 # --- stale ---
 printf '%s\n' "$(sed -E 's/^## [0-9-]+T/## 2020-01-01T/' "$J/par.md")" > "$J/par.md"
 has "old task is stale" "$(m state)" "par [stale,"
+# next older than the limit, with newer records after it
+old=$(grep -n ' next s:' "$J/ship.md" | tail -n1 | cut -d: -f1)
+sed -i "${old}s/^## [0-9-]*T/## 2020-01-01T/" "$J/ship.md"
+has "old next is flagged in the index" "$(m state)" "ship [active, next "
+has "old next is flagged in show" "$(m task show ship)" "d old: check it"
+echo "tag it" | m task log ship next
+hasnt "fresh next clears the flag" "$(m state)" "next "
 
 # --- close ---
 echo x | m task close nosuch >/dev/null 2>&1; ok "close unknown refused" $? 2

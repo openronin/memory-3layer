@@ -16,6 +16,9 @@ TASKS="$PD/_tasks"
 ARCHIVE="$TASKS/archive"
 CORE="$PD/CORE.md"
 STALE_DAYS="${TASK_STALE_DAYS:-7}"
+NEXT_STALE_DAYS="${TASK_NEXT_STALE_DAYS:-3}"
+SHOW_NOTES="${TASK_SHOW_NOTES:-2}"
+SHOW_NOTE_CHARS="${TASK_SHOW_NOTE_CHARS:-1500}"
 BRIEF_BYTES="${CORE_BRIEF_BYTES:-5000}"
 CORE_SOFT="${CORE_SOFT_BYTES:-20000}"
 CORE_HARD="${CORE_HARD_BYTES:-40000}"
@@ -94,16 +97,16 @@ need_active() {
 # --- reading ------------------------------------------------------------------
 
 summary() {
-  # status <TAB> last time <TAB> goal <TAB> next <TAB> blocker: first lines only.
+  # status <TAB> last time <TAB> goal <TAB> next <TAB> blocker <TAB> time of the next or blocker: first lines only.
   awk -v h="$HEADER" '
-    $0 ~ h { t = $3; last = $2; want = 1; if (t == "next" || t == "blocker") kind = t; if (t == "close") closed = 1; next }
+    $0 ~ h { t = $3; last = $2; want = 1; if (t == "next" || t == "blocker") { kind = t; nt = $2 }; if (t == "close") closed = 1; next }
     want && NF {
       if (t == "open") goal = $0; else if (t == "next") nx = $0; else if (t == "blocker") bl = $0
       want = 0
     }
     END {
       s = closed ? "done" : (kind == "blocker" ? "blocked" : "active")
-      printf "%s\t%s\t%s\t%s\t%s\n", s, last, goal, nx, bl
+      printf "%s\t%s\t%s\t%s\t%s\t%s\n", s, last, goal, nx, bl, nt
     }' "$1"
 }
 
@@ -112,21 +115,28 @@ age_days() {
   echo $(( ($(date +%s) - e) / 86400 ))
 }
 
+index_line() {
+  # One line for a task: the index is for choosing, and `task show` has the whole text.
+  local f=$1 slug status last goal nx bl nt text days
+  slug=${f##*/}; slug=${slug%.md}
+  IFS=$'\x1f' read -r status last goal nx bl nt < <(summary "$f" | tr '\t' '\037')
+  text=$nx; [[ "$status" == blocked ]] && text=$bl; [[ -n "$text" ]] || text=$goal
+  [[ ${#text} -le 100 ]] || text="${text:0:100}..."
+  days=$(age_days "$last")
+  if [[ "$days" -ge "$STALE_DAYS" ]]; then status="stale, ${days}d"
+  elif [[ "$status" != done && -n "$nt" ]]; then
+    days=$(age_days "$nt")
+    [[ "$days" -lt "$NEXT_STALE_DAYS" ]] || status="$status, next ${days}d old"
+  fi
+  printf '%s [%s] %s\n' "$slug" "$status" "$text"
+}
+
 index() {
   # The list a session starts with: one line per active task, then the recent closed ones.
-  local f slug status last goal nx bl days text closed
+  local f slug closed
   if compgen -G "$TASKS/*.md" >/dev/null; then
     echo "Active tasks:"
-    for f in "$TASKS"/*.md; do
-      slug=${f##*/}; slug=${slug%.md}
-      IFS=$'\x1f' read -r status last goal nx bl < <(summary "$f" | tr '\t' '\037')
-      text=$nx; [[ "$status" == blocked ]] && text=$bl; [[ -n "$text" ]] || text=$goal
-      # One line each: the index is for choosing, and `task show` has the whole text.
-      [[ ${#text} -le 100 ]] || text="${text:0:100}..."
-      days=$(age_days "$last")
-      [[ "$days" -ge "$STALE_DAYS" ]] && status="stale, ${days}d"
-      printf '  %s [%s] %s\n' "$slug" "$status" "$text"
-    done
+    for f in "$TASKS"/*.md; do printf '  %s\n' "$(index_line "$f")"; done
   else
     echo "Active tasks: none"
   fi
@@ -137,16 +147,18 @@ index() {
 }
 
 show() {
-  # The state of a task: everything an agent needs to continue, and no history.
-  local slug=$1 f status; f=$2
-  status=$(summary "$f" | cut -f1)
+  # The state of a task: everything an agent needs to continue, the last notes, and no older history.
+  local slug=$1 f status nt days=0; f=$2
+  IFS=$'\x1f' read -r status _ _ _ _ nt < <(summary "$f" | tr '\t' '\037')
+  [[ "$status" == done || -z "$nt" ]] || days=$(age_days "$nt")
   printf 'Task %s [%s]\n' "$slug" "$status"
-  awk -v h="$HEADER" '
+  awk -v h="$HEADER" -v keep="$SHOW_NOTES" -v cap="$SHOW_NOTE_CHARS" -v days="$days" -v limit="$NEXT_STALE_DAYS" '
     $0 ~ h {
       t = $3; n++
       if (t == "next") nx = ""; else if (t == "blocker") bl = ""
       else if (t == "decision" && dec != "") dec = dec "\n"
       if (t == "decision") dec = dec "- " substr($2, 1, 10) ": "
+      if (t == "note") { nn++; note[nn] = "- " substr($2, 1, 10) ": " }
       if (t == "blocker") kind = t; else if (t == "next") kind = t
       fresh = 1; next
     }
@@ -157,16 +169,25 @@ show() {
       else if (t == "next") nx = nx line
       else if (t == "blocker") bl = bl line
       else if (t == "decision") dec = dec line
+      else if (t == "note") note[nn] = note[nn] line
       else if (t == "close") res = res line
     }
     END {
-      sub(/\n+$/, "", goal); sub(/\n+$/, "", nx); sub(/\n+$/, "", bl); sub(/\n+$/, "", res); gsub(/\n\n+/, "\n", dec)
+      sub(/\n+$/, "", goal); sub(/\n+$/, "", nx); sub(/\n+$/, "", bl); sub(/\n+$/, "", res); gsub(/\n\n+/, "\n", dec); sub(/\n+$/, "", dec)
       if (goal != "") print "Goal: " goal
       if (kind == "blocker" && bl != "") print "Blocker: " bl
       if (nx != "") print "Next: " nx
+      if (days >= limit) print "(next is " days "d old: check it against what was done before continuing)"
       if (dec != "") print "Decisions:\n" dec
+      if (nn > 0 && keep > 0) {
+        print (nn > keep ? "Last " keep " notes of " nn ":" : "Notes:")
+        for (i = (nn > keep ? nn - keep + 1 : 1); i <= nn; i++) {
+          sub(/\n+$/, "", note[i])
+          print (length(note[i]) > cap ? substr(note[i], 1, cap) "... (the whole note is in --log)" : note[i])
+        }
+      }
       if (res != "") print "Result: " res
-      print "(" n " records; --log shows them all)"
+      print "(" n " records; --log shows them all, --brief one line)"
     }' "$f"
 }
 
@@ -220,10 +241,15 @@ cmd_resume() {
 }
 
 cmd_show() {
-  [[ $# -ge 1 ]] || die "usage: task show <name> [--log]"
+  [[ $# -ge 1 ]] || die "usage: task show <name> [--log|--brief]"
   valid_slug "$1"
   local f; f=$(find_task "$1") || die "no task '$1'"
-  if [[ "${2:-}" == --log ]]; then cat "$f"; else show "$1" "$f"; fi
+  case "${2:-}" in
+    --log) cat "$f" ;;
+    --brief) index_line "$f" ;;
+    "") show "$1" "$f" ;;
+    *) die "usage: task show <name> [--log|--brief]" ;;
+  esac
 }
 
 close_locked() {
@@ -386,9 +412,10 @@ case "$cmd" in
       log) cmd_log "$@" ;;
       resume) cmd_resume "$@" ;;
       show) cmd_show "$@" ;;
+      list) index ;;
       close) cmd_close "$@" ;;
       redact) cmd_redact "$@" ;;
-      *) die "usage: task open|log|resume|show|close|redact" ;;
+      *) die "usage: task open|log|resume|show|list|close|redact (list is the same as state)" ;;
     esac ;;
   *) die "usage: task ... | state | core ..." ;;
 esac
