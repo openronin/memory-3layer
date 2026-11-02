@@ -2,7 +2,7 @@
 # Tests for bin/memory-3layer. Runs in a temp HOME and touches no real data.
 set -u
 BIN="$(cd "$(dirname "$0")/.." && pwd)/bin/memory-3layer"
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+T=$(cd "$(mktemp -d)" && pwd -P); trap 'rm -rf "$T"' EXIT
 export HOME="$T/home"; mkdir -p "$HOME"
 unset MEMORY_3LAYER_HOME MEMORY_3LAYER_SECRETS MEMORY_3LAYER_CONFIG XDG_DATA_HOME XDG_CONFIG_HOME
 fail=0; n=0
@@ -36,6 +36,8 @@ mkdir -p "$HOME/p/plain"
 ok "no git: path under home" "$(m key "$HOME/p/plain")" local/p/plain
 git init -q "$HOME/p/noremote"
 ok "no remote: path under home" "$(m key "$HOME/p/noremote")" local/p/noremote
+ln -s "$HOME" "$T/linked-home"
+ok "no remote: home through a symlink" "$(HOME="$T/linked-home" bash "$BIN" key "$T/linked-home/p/noremote")" local/p/noremote
 ok "project path" "$(MEMORY_3LAYER_HOME=/d m path project "$R")" /d/projects/github.com/o/r
 
 # --- pinned key, with fallback ---
@@ -161,11 +163,11 @@ m import ../x >/dev/null 2>&1; ok "bad harness name fails" $? 2
 # --- migrate from the older layout ---
 M2="$T/m2"; export MEMORY_3LAYER_HOME="$M2" MEMORY_3LAYER_CONFIG="$T/m2cfg/config"
 mkdir -p "$C/memory"; printf 'me\n' > "$C/memory/IDENTITY.md"; printf 'L2_SOFT_BYTES=1\n' > "$C/.memory-config"
-printf 'session a\n' > "$A/memory/SESSION.md"; touch -d '2026-01-02' "$A/memory/SESSION.md"
+printf 'session a\n' > "$A/memory/SESSION.md"; touch -t 202601020000 "$A/memory/SESSION.md"
 W="$T/wt-old"; git -C "$R" worktree add -q "$W" -b oldwt 2>/dev/null
 W2="$C/projects/$(slug "$W")"; mkdir -p "$W2/memory"; printf '{"cwd":"%s"}\n' "$W" > "$W2/s.jsonl"
-printf 'session older\n' > "$W2/memory/SESSION.md"; touch -d '2026-01-01' "$W2/memory/SESSION.md"
-printf 'ours\n' > "$W2/memory/project.md"; touch -d '2025-01-01' "$W2/memory/project.md"
+printf 'session older\n' > "$W2/memory/SESSION.md"; touch -t 202601010000 "$W2/memory/SESSION.md"
+printf 'ours\n' > "$W2/memory/project.md"; touch -t 202501010000 "$W2/memory/project.md"
 printf 'gone session\n' > "$G/memory/SESSION.md"
 PD="$M2/projects/github.com/o/r"
 srcsum=$(cd "$C" && find . -type f -exec md5sum {} + | sort | md5sum)
@@ -184,10 +186,10 @@ ok "native notes not migrated" "$(test -e "$PD/feedback_x.md"; echo $?)" 1
 ok "migrate leaves the source" "$(cd "$C" && find . -type f -exec md5sum {} + | sort | md5sum)" "$srcsum"
 case "$(m migrate claude-code --apply | tail -1)" in *" 0 to copy"*) r=y ;; *) r=n ;; esac; ok "second migrate copies nothing" $r y
 printf 'session a, continued\n' > "$PD/SESSION.md"
-printf 'old system wrote\n' > "$A/memory/SESSION.md"; touch -d '2026-01-03' "$A/memory/SESSION.md"
+printf 'old system wrote\n' > "$A/memory/SESSION.md"; touch -t 202601030000 "$A/memory/SESSION.md"
 m migrate claude-code --apply >/dev/null
 ok "newer destination is not overwritten" "$(cat "$PD/SESSION.md")" "session a, continued"
-touch -d '2020-01-01' "$PD/SESSION.md"; m migrate claude-code --apply >/dev/null
+touch -t 202001010000 "$PD/SESSION.md"; m migrate claude-code --apply >/dev/null
 ok "newer source updates a stale copy" "$(cat "$PD/SESSION.md")" "old system wrote"
 # assign
 U="$M2/projects/_unassigned/-gone-project"

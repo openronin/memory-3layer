@@ -3,7 +3,7 @@
 # Fake tokens are assembled at runtime so this file never trips a scanner.
 set -u
 SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/bin/memory-secrets.sh"
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+T=$(cd "$(mktemp -d)" && pwd -P); trap 'rm -rf "$T"' EXIT
 export MEMORY_3LAYER_SECRETS="$T/store" MEMORY_3LAYER_HOME="$T/data" CLAUDE_HOME="$T/claude"
 M="$CLAUDE_HOME/projects/-x/memory"; mkdir -p "$M" "$CLAUDE_HOME/memory"
 fail=0; n=0
@@ -17,8 +17,9 @@ PW="Pr0d-Pa55-Word"
 # --- store ---
 printf '%s\n' "$PW" | ms put db >/dev/null
 ok "put strips the newline" "$(cat "$T/store/db")" "$PW"
-ok "file mode is 600" "$(stat -c %a "$T/store/db")" 600
-ok "store mode is 700" "$(stat -c %a "$T/store")" 700
+mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
+ok "file mode is 600" "$(mode "$T/store/db")" 600
+ok "store mode is 700" "$(mode "$T/store")" 700
 ok "list shows the name" "$(ms list)" db
 ms has db; ok "has: present" $? 0
 ms has nope; ok "has: absent" $? 1
