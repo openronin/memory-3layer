@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Rotation keeps one line per archive file in `SESSION.md` instead of a stub per arc, and folds existing stubs at the next `/memory rotate`.
+- The stale `SESSION.md` warning no longer makes the agent ask "continue or reset" before answering a question unrelated to it.
+
 ## v7.1.1 — 2026-11-02 — macOS support
 
 - macOS: dates, timeouts and `/memstat` work without GNU tools. Sync and `migrate` need bash 4 (`brew install bash`), find it by themselves, and say so when it is missing. Based on a report and fixes by @gorlitsyn.

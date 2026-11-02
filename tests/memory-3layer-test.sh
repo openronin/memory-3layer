@@ -91,6 +91,7 @@ case "$(ctx)" in *"$P/SESSION.md"*) r=y ;; *) r=n ;; esac; ok "context names the
 case "$(ctx)" in *OVERRIDDEN*|*ignore\ them*) r=y ;; *) r=n ;; esac; ok "context doesn't override the harness" $r n
 printf -- '---\nlast_updated: 2020-01-01T00:00:00Z\n---\n' > "$P/SESSION.md"
 case "$(ctx)" in *STALE*) r=y ;; *) r=n ;; esac; ok "stale warning" $r y
+case "$(ctx)" in *"does not depend on it without asking"*) r=y ;; *) r=n ;; esac; ok "stale: a question unrelated to it needs no asking" $r y
 printf -- '---\nlast_updated: %s\n---\n' "$(date -u +%FT%TZ)" > "$P/SESSION.md"
 case "$(ctx)" in *STALE*) r=y ;; *) r=n ;; esac; ok "fresh: no warning" $r n
 head -c 41000 /dev/zero | tr '\0' x >> "$P/SESSION.md"
