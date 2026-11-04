@@ -137,17 +137,45 @@ has "old next is flagged in show" "$(m task show ship)" "d old: check it"
 echo "tag it" | m task log ship next
 hasnt "fresh next clears the flag" "$(m state)" "next "
 
+# --- the step inside a next that tells what was done ---
+echo "Run 7 done: 12 turns, 3.9M tokens. Дальше: discuss the threshold with user" | m task log ship next
+has "index shows the step after the marker" "$(m state)" "ship [active] discuss the threshold with user"
+hasnt "and not the report before it" "$(m state)" "Run 7 done"
+echo "report to user; next: run 8, then next: run 9" | m task log ship next
+has "the last marker wins" "$(m state)" "ship [active] run 9"
+has "show keeps the whole next" "$(m task show ship)" "Next: report to user; next: run 8"
+echo "next with no marker" | m task log ship next
+has "no marker, whole text" "$(m state)" "ship [active] next with no marker"
+
+# --- decisions are capped ---
+for i in 1 2 3 4 5 6 7; do echo "decision $i" | m task log ship decision; done
+out=$(m task show ship)
+has "show: last 5 decisions" "$out" "Last 5 decisions of 8 (the rest are in --log):"
+has "show: newest decision kept" "$out" "decision 7"
+hasnt "show: oldest decision dropped" "$out" "decision 2"
+has "show: all decisions in the log" "$(m task show ship --log | grep -c 'decision [0-9]')" "7"
+out=$(TASK_SHOW_DECISIONS=10 m task show ship); has "cap is configurable" "$out" "Decisions:"
+
+# --- files ---
+F=$(m task files ship); ok "files prints the directory" "$F" "$J/ship.files"
+ok "files creates it" "$(test -d "$F"; echo $?)" 0
+echo 'echo rollback' > "$F/rollback.sh"; ok "files are written freely" $? 0
+m task files nosuch >/dev/null 2>&1; ok "files of an unknown task refused" $? 2
+
 # --- close ---
 echo x | m task close nosuch >/dev/null 2>&1; ok "close unknown refused" $? 2
 printf '' | m task close ship >/dev/null 2>&1; ok "close needs a result" $? 2
 echo "Shipped v1" | m task close ship >/dev/null; ok "close works" $? 0
 ok "journal left the active list" "$(test -e "$J/ship.md"; echo $?)" 1
 A=$(ls "$J"/archive/*/ship.md); ok "journal archived whole" "$(grep -c 'just a note' "$A")" 1
+ok "files moved with the journal" "$(cat "${A%.md}.files/rollback.sh")" "echo rollback"
+ok "no files dir left behind" "$(test -e "$J/ship.files"; echo $?)" 1
+ok "files of a closed task found" "$(m task files ship)" "${A%.md}.files"
 has "state lists it as closed" "$(m state)" "Recently closed: ship"
 hasnt "and not as active" "$(m state)" "ship [active]"
 out=$(m task show ship); has "closed task can be read" "$out" "Result: Shipped v1"; has "closed status" "$out" "[done]"
 echo again | m task open ship >/dev/null; echo done2 | m task close ship >/dev/null
-ok "a reused name keeps the older journal" "$(find "$J/archive" -name 'ship*' | wc -l | tr -d ' ')" 2
+ok "a reused name keeps the older journal" "$(find "$J/archive" -name 'ship*.md' | wc -l | tr -d ' ')" 2
 out=$(cd "$R" && echo '{"hook_event_name":"SessionStart","session_id":"sess-two"}' | m context)
 hasnt "closed task unbinds" "$out" "This session works on"
 
@@ -180,6 +208,8 @@ ok "guard: sed -i" "$(jj Bash command "sed -i s/a/b/ $J/red.md" | g)" 2
 ok "guard: rm" "$(jj Bash command "rm $J/red.md" | g)" 2
 ok "guard: mv" "$(jj Bash command "mv $J/red.md /tmp/x" | g)" 2
 ok "guard: tilde path" "$(jj Bash command "echo x > ~/.local/share/memory-3layer/projects/a/_tasks/b.md" | g)" 2
+ok "guard: a task's files dir is writable" "$(jj Write file_path "$J/red.files/x.sh" content x | g)" 0
+ok "guard: shell write into the files dir" "$(jj Bash command "echo x > $J/red.files/x.sh" | g)" 0
 ok "guard: the client passes" "$(jj Bash command "echo x | memory-3layer task log red note" | g)" 0
 ok "guard: Edit of CORE.md is fine" "$(jj Edit file_path "$P/CORE.md" new_string x | g)" 0
 ok "guard: secret into CORE.md" "$(jj Edit file_path "$P/CORE.md" new_string "$FAKE" | g)" 2

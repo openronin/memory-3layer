@@ -23,7 +23,9 @@ The split:
       CORE.md                        replaces SESSION.md
       CORE.archive.YYYY-MM.md        parts moved out of CORE.md, search only
       _tasks/<slug>.md               active and blocked tasks
+      _tasks/<slug>.files/           files the task needs beyond the session, written freely
       _tasks/archive/YYYY-MM/<slug>.md  closed tasks, complete, search only
+      _tasks/archive/YYYY-MM/<slug>.files/  their files
 
 `SESSION.archive*` files stay where they are, and search still finds them. The directory is `_tasks` because routing works from the path, and a repository can well be called `tasks`.
 
@@ -49,9 +51,10 @@ The body always comes through stdin, so an agent can't trip over quoting.
     memory-3layer task open <slug>              # stdin: the goal
     memory-3layer task log <slug> <type>        # stdin: the record
     memory-3layer task resume <slug>            # bind this session, print the task's state
-    memory-3layer task show <slug>              # state: goal, next, decisions, the last TASK_SHOW_NOTES notes (2), each cut at TASK_SHOW_NOTE_CHARS (1500)
+    memory-3layer task show <slug>              # state: goal, next, the last TASK_SHOW_DECISIONS decisions (5), the last TASK_SHOW_NOTES notes (2), each cut at TASK_SHOW_NOTE_CHARS (1500)
     memory-3layer task show <slug> --log        # the whole journal
     memory-3layer task show <slug> --brief      # one line, as in the index
+    memory-3layer task files <slug>             # prints the task's files directory, creating it
     memory-3layer task close <slug>             # stdin: the result, required
     memory-3layer state                         # index: active and recent tasks (task list is the same)
     memory-3layer core stash <title>            # stdin: text to archive; prints a link to leave in its place
@@ -62,9 +65,13 @@ The session id comes from `CLAUDE_CODE_SESSION_ID`, with `--session` for harness
 
 The guard blocks direct writes to `_tasks/`, including shell redirects. A mistake is corrected with a new record. The one exception is a `task redact` command for a secret that got through.
 
+The index shows the start of the last `next`. When that record first tells what was done and the step comes after a `next:` or `Дальше:` marker, the index shows the step. The session context says what each record type is for, because a long session loses the convention after a compaction: `note` is what was done and learned, `decision` a choice and why, `next` the step ahead.
+
+Files a task needs beyond the session, such as scripts for a later rollback, go into the directory `task files <slug>` prints: `_tasks/<slug>.files/`. The guard lets those be written directly, and `task close` moves the directory to the archive with the journal.
+
 ## Closing a task
 
-`task close` needs the result and moves the journal, complete, to `_tasks/archive/`. Before closing, the agent moves what must outlive the task into `CORE.md`. There are no separate stubs: the recent list is computed from the archive's `close` records, so nothing else grows.
+`task close` needs the result and moves the journal, complete, to `_tasks/archive/`, with its files directory. Before closing, the agent moves what must outlive the task into `CORE.md`. The session context and the pre-compaction reminder both say that a task whose work is done is closed, because an agent left to itself keeps finished tasks open. There are no separate stubs: the recent list is computed from the archive's `close` records, so nothing else grows.
 
 ## What a session gets
 

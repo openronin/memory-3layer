@@ -176,6 +176,7 @@ is_memory_path() {
 is_journal_path() {
   # A task journal has one writer, the client, which owns its ids and times.
   case "$1" in
+    */_tasks/*.files/*) return 1 ;;
     "$MEMORY_HOME"/projects/*/_tasks/*|"~${MEMORY_HOME#"$HOME"}"/projects/*/_tasks/*) return 0 ;;
   esac
   return 1

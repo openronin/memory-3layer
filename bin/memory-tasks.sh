@@ -19,6 +19,7 @@ STALE_DAYS="${TASK_STALE_DAYS:-7}"
 NEXT_STALE_DAYS="${TASK_NEXT_STALE_DAYS:-3}"
 SHOW_NOTES="${TASK_SHOW_NOTES:-2}"
 SHOW_NOTE_CHARS="${TASK_SHOW_NOTE_CHARS:-1500}"
+SHOW_DECISIONS="${TASK_SHOW_DECISIONS:-5}"
 BRIEF_BYTES="${CORE_BRIEF_BYTES:-5000}"
 CORE_SOFT="${CORE_SOFT_BYTES:-20000}"
 CORE_HARD="${CORE_HARD_BYTES:-40000}"
@@ -121,6 +122,8 @@ index_line() {
   slug=${f##*/}; slug=${slug%.md}
   IFS=$'\x1f' read -r status last goal nx bl nt < <(summary "$f" | tr '\t' '\037')
   text=$nx; [[ "$status" == blocked ]] && text=$bl; [[ -n "$text" ]] || text=$goal
+  # A next that tells what was done first: the index shows the step itself.
+  [[ "$text" == "$nx" ]] && text=$(step_of "$text")
   [[ ${#text} -le 100 ]] || text="${text:0:100}..."
   days=$(age_days "$last")
   if [[ "$days" -ge "$STALE_DAYS" ]]; then status="stale, ${days}d"
@@ -129,6 +132,15 @@ index_line() {
     [[ "$days" -lt "$NEXT_STALE_DAYS" ]] || status="$status, next ${days}d old"
   fi
   printf '%s [%s] %s\n' "$slug" "$status" "$text"
+}
+
+step_of() {
+  # The text after the last "next:" / "Дальше:" marker, or the whole text.
+  local t=$1 m
+  while [[ "$t" =~ ^(.*[^[:alnum:]])?(Next|next|NEXT|Дальше|дальше|Далее|далее)[[:space:]]*:[[:space:]]*([^[:space:]].*)$ ]]; do
+    m=${BASH_REMATCH[3]}; [[ "$m" != "$t" ]] || break; t=$m
+  done
+  printf '%s' "$t"
 }
 
 index() {
@@ -152,12 +164,11 @@ show() {
   IFS=$'\x1f' read -r status _ _ _ _ nt < <(summary "$f" | tr '\t' '\037')
   [[ "$status" == done || -z "$nt" ]] || days=$(age_days "$nt")
   printf 'Task %s [%s]\n' "$slug" "$status"
-  awk -v h="$HEADER" -v keep="$SHOW_NOTES" -v cap="$SHOW_NOTE_CHARS" -v days="$days" -v limit="$NEXT_STALE_DAYS" '
+  awk -v h="$HEADER" -v keep="$SHOW_NOTES" -v cap="$SHOW_NOTE_CHARS" -v keepd="$SHOW_DECISIONS" -v days="$days" -v limit="$NEXT_STALE_DAYS" '
     $0 ~ h {
       t = $3; n++
       if (t == "next") nx = ""; else if (t == "blocker") bl = ""
-      else if (t == "decision" && dec != "") dec = dec "\n"
-      if (t == "decision") dec = dec "- " substr($2, 1, 10) ": "
+      if (t == "decision") { nd++; dec[nd] = "- " substr($2, 1, 10) ": " }
       if (t == "note") { nn++; note[nn] = "- " substr($2, 1, 10) ": " }
       if (t == "blocker") kind = t; else if (t == "next") kind = t
       fresh = 1; next
@@ -168,17 +179,20 @@ show() {
       if (t == "open") goal = goal line
       else if (t == "next") nx = nx line
       else if (t == "blocker") bl = bl line
-      else if (t == "decision") dec = dec line
+      else if (t == "decision") dec[nd] = dec[nd] line
       else if (t == "note") note[nn] = note[nn] line
       else if (t == "close") res = res line
     }
     END {
-      sub(/\n+$/, "", goal); sub(/\n+$/, "", nx); sub(/\n+$/, "", bl); sub(/\n+$/, "", res); gsub(/\n\n+/, "\n", dec); sub(/\n+$/, "", dec)
+      sub(/\n+$/, "", goal); sub(/\n+$/, "", nx); sub(/\n+$/, "", bl); sub(/\n+$/, "", res)
       if (goal != "") print "Goal: " goal
       if (kind == "blocker" && bl != "") print "Blocker: " bl
       if (nx != "") print "Next: " nx
       if (days >= limit) print "(next is " days "d old: check it against what was done before continuing)"
-      if (dec != "") print "Decisions:\n" dec
+      if (nd > 0 && keepd > 0) {
+        print (nd > keepd ? "Last " keepd " decisions of " nd " (the rest are in --log):" : "Decisions:")
+        for (i = (nd > keepd ? nd - keepd + 1 : 1); i <= nd; i++) { sub(/\n+$/, "", dec[i]); print dec[i] }
+      }
       if (nn > 0 && keep > 0) {
         print (nn > keep ? "Last " keep " notes of " nn ":" : "Notes:")
         for (i = (nn > keep ? nn - keep + 1 : 1); i <= nn; i++) {
@@ -253,8 +267,22 @@ cmd_show() {
 }
 
 close_locked() {
-  local f=$1 dest=$2
-  append "$f" close "$BODY" && mkdir -p "${dest%/*}" && mv "$f" "$dest"
+  local f=$1 dest=$2 d
+  append "$f" close "$BODY" && mkdir -p "${dest%/*}" && mv "$f" "$dest" || return 1
+  # The task's files go with the journal.
+  d="${f%.md}.files"
+  [[ ! -d "$d" ]] || mv "$d" "${dest%.md}.files"
+}
+
+cmd_files() {
+  # Where a task keeps files that must outlive the session: scripts, exports, a rollback.
+  [[ $# -eq 1 ]] || die "usage: task files <name>"
+  valid_slug "$1"
+  local f d; f=$(find_task "$1") || die "no task '$1'"
+  d="${f%.md}.files"
+  [[ -d "$d" || "$f" != "$(active_file "$1")" ]] || mkdir -p "$d" || die "cannot create $d"
+  [[ -d "$d" ]] || die "task '$1' is closed and had no files"
+  printf '%s\n' "$d"
 }
 
 cmd_close() {
@@ -412,10 +440,11 @@ case "$cmd" in
       log) cmd_log "$@" ;;
       resume) cmd_resume "$@" ;;
       show) cmd_show "$@" ;;
+      files) cmd_files "$@" ;;
       list) index ;;
       close) cmd_close "$@" ;;
       redact) cmd_redact "$@" ;;
-      *) die "usage: task open|log|resume|show|list|close|redact (list is the same as state)" ;;
+      *) die "usage: task open|log|resume|show|files|list|close|redact (list is the same as state)" ;;
     esac ;;
   *) die "usage: task ... | state | core ..." ;;
 esac

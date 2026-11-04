@@ -210,8 +210,8 @@ Client: $SELF_DIR/memory-3layer. Rules: the protocol skill, or CLAUDE.md.
 
 Work with more than one step, or that can outlive this session, is a task. Pass the text on stdin:
   memory-3layer task open <name> | task resume <name> | task show <name> [--log|--brief] | task list
-  memory-3layer task log <name> note|decision|next|blocker | task close <name>
-Journals are written only through these commands. Keep next current as you work.
+  memory-3layer task log <name> note|decision|next|blocker | task files <name> | task close <name>
+Journals are written only through these commands. Keep next current as you work: note is what was done and learned, decision is a choice and why, next is only the step ahead (the index shows its start). Files a task needs beyond this session go in the directory task files prints. A task whose work is done is closed, after what must outlive it has moved into CORE.md.
 $pd/CORE.md is yours to edit freely: live extracts worth keeping, with the most important in its # Brief block. Before closing a task, move what must outlive it there. Never write a secret value into memory; write secret://<name>.
 TEXT
   if compgen -G "$pd/imported/*/*.md" >/dev/null; then
@@ -519,7 +519,7 @@ memory-3layer — agent memory that belongs to no harness
   refresh [--debounce]                          rebuild the search index
   guard                                         PreToolUse hook: block secrets, allow the data dir
   secret <command>                              local secret store: put, list, run, scan...
-  task open|log|resume|show|list|close|redact   task journals: docs/tasks.md
+  task open|log|resume|show|files|list|close|redact   task journals: docs/tasks.md
   state                                         active and recently closed tasks (same as task list)
   core init | stash <title> | brief             CORE.md: put a project on it, archive a part, see the brief
 USAGE
