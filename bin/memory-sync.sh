@@ -32,6 +32,9 @@ STORES="$STATE/stores"
 HOST=$(hostname -s 2>/dev/null || echo unknown)
 
 MODE=full
+ALLOW_DELETES=""
+# More deletions than this in one sync are held back as a likely accident.
+MAX_DELETES=${MEMORY_3LAYER_MAX_DELETES:-10}
 QUIET=0
 NET_TIMEOUT=30
 # With no changes of its own, a tick still syncs this often, to bring in other machines' work.
@@ -333,16 +336,38 @@ copy_out() {
 }
 
 remove_deleted() {
-  # A file that was synced before and is gone from the data dir was deleted on purpose.
-  # With no recorded base nothing counts as deleted: a new machine starts empty.
-  local addr=$1 base=$2 p
-  [[ -n "$base" ]] || return 0
-  git -C "$CLONE" cat-file -e "$base" 2>/dev/null || return 0
+  # A file this machine had in its data dir at the last sync, and that is gone now,
+  # was deleted on purpose. Only files from this machine's own list count: the base
+  # commit may hold files this machine never laid out (another client wrote the base,
+  # the route arrived later), and their absence is not a deletion.
+  # Many deletions at once look like an accident, not a decision: they are not
+  # applied, and copy_in brings the files back, unless the user asked with --allow-deletes.
+  local addr=$1 p rest k counted=0
+  local -a gone=()
+  [[ -f "$CLONE.seen" ]] || return 0
   while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
     [[ -e "$DATA/$p" || ! -e "$CLONE/$p" ]] && continue
-    [[ "$(route_path "$p")" == "$addr" ]] && rm -f "$CLONE/$p"
-  done < <(git -C "$CLONE" ls-tree -r --name-only "$base")
+    [[ "$(route_path "$p")" == "$addr" ]] || continue
+    gone+=("$p")
+    # A closed task moved into the archive is not a loss.
+    if [[ "$p" == projects/*/_tasks/* && "$p" != */_tasks/archive/* ]]; then
+      k=${p%%/_tasks/*}; rest=${p#*/_tasks/}
+      compgen -G "$DATA/$k/_tasks/archive/*/$rest" >/dev/null && continue
+    fi
+    counted=$((counted+1))
+  done < "$CLONE.seen"
+  if [[ $counted -gt $MAX_DELETES && -z "$ALLOW_DELETES" ]]; then
+    printf '%s: %d files are gone from this machine; not deleting them from the storage, they are restored. If the deletion is intended, delete them again and run: memory-3layer sync --allow-deletes\n' "$ADDR" "$counted" >&2
+    return 0
+  fi
+  for p in "${gone[@]}"; do rm -f "$CLONE/$p"; done
   return 0
+}
+
+write_seen() {
+  # What this storage has in the data dir now: the only files a later sync may delete.
+  routed_files "$1" > "$CLONE.seen.tmp" && mv -f "$CLONE.seen.tmp" "$CLONE.seen"
 }
 
 write_aliases() {
@@ -537,7 +562,7 @@ sync_store() {
   [[ -n "$base" ]] || first=1
   SKIPPED=()
   copy_out "$ADDR" "$first"
-  remove_deleted "$ADDR" "$base"
+  remove_deleted "$ADDR"
   write_aliases "$ADDR"
   commit_local
   pre=$(git -C "$CLONE" rev-parse -q --verify HEAD 2>/dev/null || true)
@@ -557,6 +582,7 @@ sync_store() {
       fi
       if ! net_git -C "$CLONE" push -q origin "$BRANCH"; then
         git -C "$CLONE" rev-parse HEAD > "$CLONE.base"
+        write_seen "$ADDR"
         write_state "$CLONE" fail "push: $NET_WHY"
         printf '%s: push: %s, will retry at the next sync\n' "$ADDR" "$NET_WHY" >&2
         rmdir "$lock"; return 1
@@ -564,6 +590,7 @@ sync_store() {
     fi
   fi
   git -C "$CLONE" rev-parse -q --verify HEAD > "$CLONE.base" 2>/dev/null
+  write_seen "$ADDR"
   write_state "$CLONE" ok ""
   say "$ADDR: synced"
   rmdir "$lock"
@@ -752,7 +779,8 @@ case "$sub" in
       case "$1" in
         --pull) MODE=pull; NET_TIMEOUT=5 ;;
         --quiet) QUIET=1 ;;
-        *) echo "usage: sync [--pull] [--quiet] | tick [seconds] | init <address> | status | check | route [key]" >&2; exit 2 ;;
+        --allow-deletes) ALLOW_DELETES=1 ;;
+        *) echo "usage: sync [--pull] [--quiet] [--allow-deletes] | tick [seconds] | init <address> | status | check | route [key]" >&2; exit 2 ;;
       esac
       shift
     done

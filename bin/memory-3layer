@@ -535,7 +535,7 @@ memory-3layer — agent memory that belongs to no harness
   path [home|secrets|config|state|identity|project] where things live (default: project)
   key [dir]                                     the project's stable key
   context [--hook-format hook|text]             what an agent must read at session start
-  sync [--pull] [--quiet]                       sync with the configured storages
+  sync [--pull] [--quiet] [--allow-deletes]     sync with the configured storages
   sync tick [seconds]                           sync in the background if memory changed; for hooks
   sync init <address> | status | check | route [key]
                                                 set the default storage, see state, test access, see routing

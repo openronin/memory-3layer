@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixed: sync could delete from a storage files this machine never laid out (a base left by another client, a route added later), and the deletion reached the other machines. Now only a file this machine had at its last sync counts as deleted, and more than 10 deletions at once wait for `sync --allow-deletes`.
+
 ## v7.1.2 — 2026-11-02 — Shorter SESSION.md, fewer needless questions
 
 - Rotation keeps one line per archive file in `SESSION.md` instead of a stub per arc, and folds existing stubs at the next `/memory rotate`.

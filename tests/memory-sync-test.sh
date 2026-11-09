@@ -60,6 +60,21 @@ rm "$(data a)/$K/SESSION.archive.2026-01.md"; on a sync --quiet; on b sync --qui
 ok "deletion travels" "$(exists b "$K/SESSION.archive.2026-01.md")" 1
 ok "deletion leaves other files" "$(rd b "$K/project.md")" "facts 2"
 
+# Incident 09.11: the base held files this machine never laid out (another client wrote
+# it, or the route came later). Their absence is not a deletion.
+SB=$(ls -d "$T/b/.local/state/memory-3layer/stores/"*.seen | head -1)
+rm "$SB"; rm -rf "$(data b)/$K"; on b sync --quiet
+ok "unseen file: not deleted from the storage" "$(git -C "$S" show main:$K/project.md)" "facts 2"
+ok "unseen file: laid out instead" "$(rd b "$K/project.md")" "facts 2"
+
+# Many deletions at once are held back until asked for.
+for i in $(seq 1 12); do mk a "$K/bulk/$i.md" "$i"; done; on a sync --quiet; on b sync --quiet
+rm -rf "$(data b)/$K/bulk"; on b sync --quiet 2>/dev/null
+ok "mass deletion: storage keeps the files" "$(git -C "$S" show main:$K/bulk/7.md)" 7
+ok "mass deletion: files restored here" "$(rd b "$K/bulk/7.md")" 7
+rm -rf "$(data b)/$K/bulk"; on b sync --quiet --allow-deletes
+ok "mass deletion: applied when asked" "$(git -C "$S" cat-file -e main:$K/bulk/7.md 2>/dev/null; echo $?)" 128
+
 # --- merge and conflict ---
 printf 'one\ntwo\nthree\nfour\nfive\nsix\nseven\n' > "$(data a)/$K/notes.md"; on a sync --quiet; on b sync --quiet
 sed -i.bak 's/one/ONE/' "$(data a)/$K/notes.md"; rm "$(data a)/$K/notes.md.bak"; sed -i.bak 's/seven/SEVEN/' "$(data b)/$K/notes.md"; rm "$(data b)/$K/notes.md.bak"

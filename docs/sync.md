@@ -36,6 +36,7 @@ Other rules:
 - An unreachable storage doesn't block the others. Each one reports its own state.
 - Changing a project's storage copies the data. Removing it from the old storage is done by hand and can't reach git history, so `sync status` warns about that.
 - `memory-3layer secret scan` runs before anything is sent. A file with a finding stays local and blocks only itself.
+- A deletion is sent only for a file this machine had at its last sync. A file it never laid out (the route came later, another client synced before) is pulled in, not deleted. More than 10 deletions at once (`MEMORY_3LAYER_MAX_DELETES`) look like an accident: they are not sent and the files come back. A task moved to the archive doesn't count. To send such a deletion, delete again and run `memory-3layer sync --allow-deletes`.
 
 ## Configuration format
 
