@@ -353,6 +353,35 @@ cmd_import() {
   [[ $apply -eq 1 ]] || printf 'Nothing was changed. Add --apply to copy.\n'
 }
 
+cmd_install_cli() {
+  # install-cli [dir]: make `memory-3layer` work in a terminal, not only inside the agent.
+  # A plugin gets the shim, which follows whichever plugin is enabled and its updates;
+  # a manual install links the client itself.
+  local dir=${1:-$HOME/.local/bin} shim="$SELF_DIR/claude-plugin-shim" f
+  mkdir -p "$dir" || die "cannot create $dir"
+  f="$dir/memory-3layer"
+  if [[ -e "$f" && ! -L "$f" ]]; then
+    mv "$f" "$f.bak-$(date +%Y%m%d%H%M%S)" && printf 'kept the old %s as .bak\n' "$f"
+  fi
+  if [[ -f "$shim" ]] && command -v python3 >/dev/null; then
+    if [[ -f "$dir/claude-plugin-shim" ]] && ! cmp -s "$shim" "$dir/claude-plugin-shim"; then
+      cp -p "$dir/claude-plugin-shim" "$dir/claude-plugin-shim.bak-$(date +%Y%m%d%H%M%S)"
+    fi
+    cp "$shim" "$dir/claude-plugin-shim.$$" && chmod 755 "$dir/claude-plugin-shim.$$" && mv -f "$dir/claude-plugin-shim.$$" "$dir/claude-plugin-shim"
+    ln -sfn claude-plugin-shim "$f"
+    if "$f" key / >/dev/null 2>&1; then
+      printf '%s -> claude-plugin-shim: runs the enabled memory-3layer plugin\n' "$f"
+    else
+      ln -sfn "$SELF_DIR/memory-3layer" "$f"
+      printf '%s -> %s: no enabled plugin found, linked this client\n' "$f" "$SELF_DIR/memory-3layer"
+    fi
+  else
+    ln -sfn "$SELF_DIR/memory-3layer" "$f"
+    printf '%s -> %s\n' "$f" "$SELF_DIR/memory-3layer"
+  fi
+  case ":$PATH:" in *":$dir:"*) ;; *) printf '%s is not on PATH: add it in your shell profile\n' "$dir" ;; esac
+}
+
 cmd_migrate() {
   # migrate <harness> [--apply]: copy data of an older version out of a harness's
   # directory. The source is never changed, and this is safe to repeat until the
@@ -554,6 +583,7 @@ memory-3layer — agent memory that belongs to no harness
   sync tick [seconds]                           sync in the background if memory changed; for hooks
   sync init <address> | status | check | route [key]
                                                 set the default storage, see state, test access, see routing
+  install-cli [dir]                             make memory-3layer work in a terminal (~/.local/bin)
   migrate <harness> [--apply]                   copy data of an older version; plan only by default
   import <harness> [--apply]                    copy a harness's own memory here; plan only by default
   pin <key> [dir] / unpin [dir]                 fix a project's key, or go back to remote, then path
@@ -591,6 +621,7 @@ case "$cmd" in
       rc=$?; cmd_tick_notes; exit $rc
     fi
     MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" exec bash "$SELF_DIR/memory-sync.sh" "$@" ;;
+  install-cli) cmd_install_cli "$@" ;;
   migrate)
     if (( BASH_VERSINFO[0] < 4 )); then
       b=$(bash4) || die "migrate needs bash 4 or newer. On macOS: brew install bash"

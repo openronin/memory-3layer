@@ -1,0 +1,39 @@
+#!/bin/sh
+# Runs <cmd> from an ENABLED Claude Code plugin, so plugin commands work in a terminal.
+# Install as symlinks named after the commands: ln -s claude-plugin-shim ~/.local/bin/xchg
+# For a marketplace from a local folder the plugin is read from that folder, as Claude Code
+# does; otherwise from its installed copy. Several enabled plugins with the command: the
+# newest version wins. Needs python3, to read Claude Code's JSON files.
+cmd=$(basename "$0")
+best=$(python3 - "$cmd" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" <<'PY'
+import json, os, re, sys
+cmd, home = sys.argv[1], sys.argv[2]
+def load(p):
+    try:
+        with open(p) as f: return json.load(f)
+    except Exception: return {}
+enabled = [k for k, v in load(os.path.join(home, "settings.json")).get("enabledPlugins", {}).items() if v is True]
+installed = load(os.path.join(home, "plugins", "installed_plugins.json")).get("plugins", {})
+markets = load(os.path.join(home, "plugins", "known_marketplaces.json"))
+def vkey(v): return [int(x) if x.isdigit() else -1 for x in re.split(r"[.+-]", v or "0")]
+found = []
+for key in enabled:
+    plug, _, mkt = key.partition("@")
+    roots = []
+    src = markets.get(mkt, {}).get("source", {})
+    if src.get("source") == "directory" and src.get("path"):
+        for p in load(os.path.join(src["path"], ".claude-plugin", "marketplace.json")).get("plugins", []):
+            if p.get("name") == plug and isinstance(p.get("source"), str):
+                d = os.path.normpath(os.path.join(src["path"], p["source"]))
+                roots.append((load(os.path.join(d, ".claude-plugin", "plugin.json")).get("version", "0"), d))
+    if not roots:
+        roots = [(i.get("version", "0"), i.get("installPath", "")) for i in installed.get(key, [])]
+    for ver, d in roots:
+        b = os.path.join(d, "bin", cmd)
+        if os.path.isfile(b) and os.access(b, os.X_OK): found.append((vkey(ver), b))
+if found: print(max(found)[1])
+PY
+)
+[ -n "$best" ] || { echo "$cmd: no enabled Claude Code plugin provides it" >&2; exit 127; }
+case "$(head -c 64 "$best")" in *bash*) exec bash "$best" "$@";; esac
+exec "$best" "$@"

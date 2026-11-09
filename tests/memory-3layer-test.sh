@@ -252,6 +252,20 @@ ok "command linked" "$(env -u MEMORY_3LAYER_HOME HOME="$H3" "$H3/.local/bin/memo
 ok "importer installed" "$(test -x "$H3/.claude/harness/claude-code/import-memory"; echo $?)" 0
 ok "no memory under .claude" "$(test -e "$H3/.claude/memory"; echo $?)" 1
 
+# --- install-cli: the shim follows the enabled plugin, a local folder over its stale copy ---
+CC="$T/cc"; mkdir -p "$CC/plugins/cache/mk/memory-3layer/1.0/bin" "$T/devmk/.claude-plugin" "$T/devmk/bin"
+printf '#!/bin/sh\necho cache\n' > "$CC/plugins/cache/mk/memory-3layer/1.0/bin/memory-3layer"
+printf '#!/bin/sh\necho folder\n' > "$T/devmk/bin/memory-3layer"; chmod +x "$CC/plugins/cache/mk/memory-3layer/1.0/bin/memory-3layer" "$T/devmk/bin/memory-3layer"
+printf '{"plugins":[{"name":"memory-3layer","source":"./"}]}' > "$T/devmk/.claude-plugin/marketplace.json"
+printf '{"version":"2.0-dev"}' > "$T/devmk/.claude-plugin/plugin.json"
+printf '{"enabledPlugins":{"memory-3layer@mk":true,"memory-3layer@dev":false}}' > "$CC/settings.json"
+printf '{"plugins":{"memory-3layer@mk":[{"version":"1.0","installPath":"%s"}],"memory-3layer@dev":[{"version":"2.0-dev","installPath":"/nowhere"}]}}' "$CC/plugins/cache/mk/memory-3layer/1.0" > "$CC/plugins/installed_plugins.json"
+printf '{"mk":{"source":{"source":"github","repo":"x/y"}},"dev":{"source":{"source":"directory","path":"%s"}}}' "$T/devmk" > "$CC/plugins/known_marketplaces.json"
+CLAUDE_CONFIG_DIR="$CC" m install-cli "$T/lbin" >/dev/null
+ok "install-cli: the enabled plugin runs" "$(CLAUDE_CONFIG_DIR="$CC" "$T/lbin/memory-3layer")" cache
+printf '{"enabledPlugins":{"memory-3layer@mk":false,"memory-3layer@dev":true}}' > "$CC/settings.json"
+ok "install-cli: a local marketplace runs from its folder" "$(CLAUDE_CONFIG_DIR="$CC" "$T/lbin/memory-3layer")" folder
+
 # --- isolation from harness memory ---
 ok "nothing written under .claude" "$(find "$HOME/.claude" 2>/dev/null | wc -l | tr -d ' ')" 0
 

@@ -14,7 +14,7 @@ Tests run on Linux and macOS. Daily use is on Linux and WSL2.
 /plugin install memory-3layer@memory-3layer
 ```
 
-Restart the session. The session context shows the client's path as `Client:`. Inside Claude Code `memory-3layer` is on `PATH`; in your own terminal use that path.
+Restart the session. Inside Claude Code `memory-3layer` is on `PATH`. For your own terminal, ask the agent to run `memory-3layer install-cli`: it links `~/.local/bin/memory-3layer` to a shim that runs whichever memory-3layer plugin is enabled, and keeps working after updates. The same shim serves other plugins' commands: `ln -s claude-plugin-shim ~/.local/bin/<command>`.
 
 Update:
 
@@ -53,10 +53,10 @@ Changed files are saved as `.bak-<timestamp>`. Your identity, project memory and
 
 ## New machine
 
-Install, then run `sync init` with the same address and `memory-3layer sync`. Three things stay behind and have to be set up again:
+Install, run `memory-3layer install-cli`, then `sync init` with the same address and `memory-3layer sync`. Three things stay behind and have to be set up again:
 
 - secrets: `memory-3layer secret put <name>`;
-- rules in the local `storage.conf`, such as corporate projects;
+- rules in the local `storage.conf`, such as corporate projects. It holds no secret values, so copy it from the old machine before the first sync. A project whose rule is missing is not laid out, and the session on it says so;
 - ssh keys.
 
 ## Optional tools

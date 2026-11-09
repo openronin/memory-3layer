@@ -3,6 +3,11 @@
 ## Unreleased
 
 - Fixed: sync could delete from a storage files this machine never laid out (a base left by another client, a route added later), and the deletion reached the other machines. Now only a file this machine had at its last sync counts as deleted, and more than 10 deletions at once wait for `sync --allow-deletes`.
+- Sync tells the session on a project when a storage holds its memory but this machine routes it elsewhere, usually a `[project]` rule missing on a new machine. `sync status` lists such projects.
+- `sync` run by hand waits up to 30 s for a running sync, then fails instead of reporting success. Hooks still step aside.
+- `secret put` with no terminal (a `!` command in Claude Code) says what to do instead of "empty value", and takes `--from-file <path>[:<line>]`. The protocol no longer suggests `!` for it.
+- `install-cli` puts `memory-3layer` on the terminal's `PATH` through a shim that follows the enabled plugin; a local marketplace runs from its folder, not from its stale copy. The shim serves other plugins' commands too.
+- `MEMORY_3LAYER_KEY` names the project for a command run outside it.
 
 ## v7.1.2 — 2026-11-02 — Shorter SESSION.md, fewer needless questions
 
