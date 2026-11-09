@@ -87,8 +87,8 @@ Do this even if a SessionStart hook also fires — idempotent.
    On task wrap-up without an explicit signal: SESSION.md is wiped to the template. **Do not auto-promote.**
 7. **Gotchas are the highest-leverage memory.** When you discover a non-obvious foot-gun (config quirk, framework gotcha, API peculiarity, naming collision, "looks wrong but is intentional"), it goes in `<repo>/.claude-docs/gotchas.md`. Future sessions hit the same wall and benefit immediately.
 8. **Server-agent test.** Before writing anything to account-local memory, ask: "Would a fresh agent who clones this repo at midnight need this?" If yes, push it in-repo.
-9. **Secrets never enter memory, in any layer.** Memory may be synced, so it holds references only: `secret://<name>` (plus where it is used). Values live in the machine-local store managed by ``memory-3layer secret`, outside any synced directory.
-   - New value from the user → ask them to run `! memory-3layer secret put <name>`, then write only `secret://<name>`.
+9. **Secrets never enter memory, in any layer.** Memory may be synced, so it holds references only: `secret://<name>` (plus where it is used). Values live in the machine-local store managed by `memory-3layer secret`, outside any synced directory.
+   - New value from the user → ask them to run `memory-3layer secret put <name>` in a separate terminal (a `!` command in Claude Code has no terminal for the hidden prompt), or `memory-3layer secret put <name> --from-file <path>[:<line>]` when the value is in a file. Then write only `secret://<name>`.
    - Use a value → `memory-3layer secret run VAR=<name> -- <command>`. Don't print it; `get` works only in a terminal.
    - `secret://<name>` missing on this machine → ask the user for it. Don't look for a copy in transcripts or logs.
    - `memory-3layer secret scan` reports `file:line` and kind, never the value; `adopt <file>:<line> <name>` moves a found value into the store. The `guard` PreToolUse hook blocks such writes where the harness supports it; it is a net, not a substitute for this rule.

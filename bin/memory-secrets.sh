@@ -24,14 +24,33 @@ ensure_store() {
 
 read_value() {
   # Read from stdin and strip one trailing newline. A value never comes from argv,
-  # because argv is visible in `ps` and in the agent's transcript.
+  # because argv is visible in `ps` and in the agent's transcript. With nothing on
+  # stdin and no terminal there (a `!` command in Claude Code), try the controlling
+  # terminal, and if there is none either, say what to do instead.
   local v
   if [[ -t 0 ]]; then
     IFS= read -r -s -p "value: " v; echo >&2
   else
     v=$(cat)
+    if [[ -z "$v" ]] && { : </dev/tty; } 2>/dev/null; then
+      printf 'value: ' >/dev/tty; IFS= read -r -s v </dev/tty; echo >/dev/tty
+    fi
   fi
-  [[ -n "$v" ]] || die "empty value"
+  if [[ -z "$v" ]]; then
+    [[ -t 0 ]] && die "empty value"
+    die "empty value: no terminal to ask in (a ! command in Claude Code has none). Run it in a separate terminal, or take the value from a file: put <name> --from-file <path>[:<line>]"
+  fi
+  printf '%s' "$v"
+}
+
+read_file_value() {
+  # read_file_value <path>[:<line>]: the whole file, or one line of it, without the newline.
+  local spec=$1 f n v
+  if [[ "$spec" =~ ^(.+):([0-9]+)$ && ! -f "$spec" ]]; then f=${BASH_REMATCH[1]}; n=${BASH_REMATCH[2]}; else f=$spec; n=""; fi
+  [[ -f "$f" && -r "$f" ]] || die "cannot read $f"
+  if [[ -n "$n" ]]; then v=$(sed -n "${n}p" "$f"); else v=$(cat "$f"); fi
+  v=${v%$'\r'}
+  [[ -n "$v" ]] || die "empty value in $spec"
   printf '%s' "$v"
 }
 
@@ -310,6 +329,7 @@ usage() {
 memory-secrets.sh — local secret store; memory holds secret://<name> references only
 
   put <name>                 store a value from stdin or a hidden prompt
+  put <name> --from-file <path>[:<line>]  the value is that file, or that line of it
   list                       names on this machine, never values
   has <name>                 exit 0 if the secret exists here
   rm <name>                  delete a secret
@@ -323,7 +343,11 @@ USAGE
 
 cmd=${1:-}; [[ $# -gt 0 ]] && shift
 case "$cmd" in
-  put) [[ $# -eq 1 ]] || die "usage: put <name>"; valid_name "$1"; v=$(read_value) || exit 2; store_value "$1" "$v"; printf 'stored secret://%s\n' "$1" ;;
+  put)
+    [[ $# -eq 1 || ( $# -eq 3 && "$2" == --from-file ) ]] || die "usage: put <name> [--from-file <path>[:<line>]]"
+    valid_name "$1"
+    if [[ $# -eq 3 ]]; then v=$(read_file_value "$3") || exit 2; else v=$(read_value) || exit 2; fi
+    store_value "$1" "$v"; printf 'stored secret://%s\n' "$1" ;;
   list) for f in "$STORE"/*; do [[ -f "$f" && "$f" != *.tmp ]] && printf '%s\n' "${f##*/}"; done; exit 0 ;;
   has) [[ $# -eq 1 ]] || die "usage: has <name>"; valid_name "$1"; [[ -f "$STORE/$1" ]] ;;
   rm) [[ $# -eq 1 ]] || die "usage: rm <name>"; valid_name "$1"; rm -- "$STORE/$1" 2>/dev/null || die "no secret '$1'" ;;

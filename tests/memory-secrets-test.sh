@@ -17,6 +17,15 @@ PW="Pr0d-Pa55-Word"
 # --- store ---
 printf '%s\n' "$PW" | ms put db >/dev/null
 ok "put strips the newline" "$(cat "$T/store/db")" "$PW"
+printf 'a\n%s\nc\n' "$PW" > "$T/val.txt"
+ms put fl --from-file "$T/val.txt:2" >/dev/null; ok "put --from-file takes one line" "$(cat "$T/store/fl")" "$PW"
+printf '%s\n' "$PW" > "$T/val1.txt"
+ms put fw --from-file "$T/val1.txt" >/dev/null; ok "put --from-file takes the file" "$(cat "$T/store/fw")" "$PW"
+if command -v setsid >/dev/null; then
+  case "$(setsid bash "$SCRIPT" put nt </dev/null 2>&1)" in *"no terminal"*"--from-file"*) r=y ;; *) r=n ;; esac
+  ok "put with no terminal says what to do" $r y
+fi
+ms rm fl; ms rm fw
 mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 ok "file mode is 600" "$(mode "$T/store/db")" 600
 ok "store mode is 700" "$(mode "$T/store")" 700
