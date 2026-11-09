@@ -9,6 +9,7 @@
 #   $MEMORY_3LAYER_HOME       default ~/.local/share/memory-3layer
 #   $MEMORY_3LAYER_SECRETS    default ~/.local/share/memory-3layer-secrets (never synced)
 #   $MEMORY_3LAYER_CONFIG     default ~/.config/memory-3layer/config
+#   $MEMORY_3LAYER_KEY        the project, wherever a command runs (else pin, git remote, path)
 
 set -u
 
@@ -119,6 +120,12 @@ project_key() {
   # In order: a pinned key, the git remote, the path under $HOME. Each step falls back
   # to the next. A worktree and any subdirectory get the same key as the main checkout.
   local dir=${1:-$PWD} root url key is_git=0
+  # Set by hand, it names the project wherever the command runs: for a directory with
+  # no git and no pin, or a command run from somewhere else.
+  if [[ -n "${MEMORY_3LAYER_KEY:-}" ]]; then
+    valid_key "$MEMORY_3LAYER_KEY" || die "bad key in MEMORY_3LAYER_KEY: '$MEMORY_3LAYER_KEY'"
+    follow_redirect "$MEMORY_3LAYER_KEY"; return
+  fi
   git -C "$dir" rev-parse --show-toplevel >/dev/null 2>&1 && is_git=1
   root=$(project_root "$dir")
   if key=$(pinned_key "$root" "$is_git"); then
@@ -179,6 +186,14 @@ sync_notes() {
     IFS=$'\t' read -r st _ addr rest < "$f"
     [[ "$st" == fail ]] && printf '\n\nSYNC: storage %s: %s, so this may not be the latest data from other machines. Tell the user; memory-3layer sync check explains the fix.' "$addr" "$rest"
   done
+  local key k here there
+  key=$(project_key 2>/dev/null) || key=""
+  if [[ -n "$key" ]]; then
+    while IFS=$'\t' read -r k here there; do
+      [[ "$k" == "$key" ]] || continue
+      printf '\n\nSYNC ROUTE: storage %s holds memory of this project, but this machine routes it to %s: what is there is not laid out here, and changes don'"'"'t reach it. Tell the user: usually storage.conf on this machine lacks a [project %s] rule (memory-3layer sync route %s). After a deliberate move, the old copy can be removed from that storage by hand.' "$here" "$there" "$key" "$key"
+    done < <(cat "$STATE_DIR"/stores/*.elsewhere 2>/dev/null)
+  fi
   if compgen -G "$pd/superseded/conflict-*/*" >/dev/null; then
     printf '\n\nSYNC CONFLICT: another version of a file from a different machine is in %s/superseded/conflict-*/. Compare it with the current file, merge what matters with the user, then delete it.' "$pd"
   fi

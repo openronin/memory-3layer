@@ -46,6 +46,8 @@ mkdir -p "$PB/projects/github.com/o/r"; printf 'state\n' > "$PB/projects/github.
 m pin my/pinned "$R" >/dev/null
 ok "pin wins over the remote" "$(m key "$R")" my/pinned
 ok "pin works from a subdir" "$(m key "$R/a/b")" my/pinned
+ok "MEMORY_3LAYER_KEY wins anywhere" "$(MEMORY_3LAYER_KEY=x/set m key "$T")" x/set
+MEMORY_3LAYER_KEY=../x m key "$T" >/dev/null 2>&1; ok "MEMORY_3LAYER_KEY must be a valid key" $? 2
 ok "pin reaches a worktree" "$(m key "$T/wt")" my/pinned
 ok "pin carries the memory" "$(cat "$PB/projects/my/pinned/SESSION.md")" state
 ok "marker stays out of git" "$(git -C "$R" status --porcelain | grep -c memory-3layer-key)" 0

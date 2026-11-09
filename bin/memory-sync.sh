@@ -35,6 +35,8 @@ MODE=full
 ALLOW_DELETES=""
 # More deletions than this in one sync are held back as a likely accident.
 MAX_DELETES=${MEMORY_3LAYER_MAX_DELETES:-10}
+# How long a sync run by hand waits for another one to finish.
+LOCK_WAIT=${MEMORY_3LAYER_LOCK_WAIT:-30}
 QUIET=0
 NET_TIMEOUT=30
 # With no changes of its own, a tick still syncs this often, to bring in other machines' work.
@@ -152,6 +154,17 @@ route_path() {
     *) layer=project ;;
   esac
   route "$key" "$layer"
+}
+
+path_key() {
+  # The project key of a path under projects/, as route_path reads it.
+  local p=${1#projects/}
+  case "$p" in
+    */_tasks/*) printf '%s' "${p%%/_tasks/*}" ;;
+    */imported/*) printf '%s' "${p%%/imported/*}" ;;
+    */superseded/*) printf '%s' "${p%%/superseded/*}" ;;
+    *) printf '%s' "${p%/*}" ;;
+  esac
 }
 
 has_password() { [[ "$1" =~ ://[^/@:]+:[^/@]+@ ]]; }
@@ -370,6 +383,21 @@ write_seen() {
   routed_files "$1" > "$CLONE.seen.tmp" && mv -f "$CLONE.seen.tmp" "$CLONE.seen"
 }
 
+write_elsewhere() {
+  # Projects this storage holds that this machine routes elsewhere, one line each:
+  # key, this storage, the local route. On a new machine it is usually a missing
+  # [project] rule in storage.conf, and the session on that project is told.
+  local addr=$1 p k r
+  local -A done_=()
+  while IFS= read -r p; do
+    [[ "$p" == projects/*/* ]] || continue
+    r=$(route_path "$p"); [[ "$r" == "$addr" ]] && continue
+    k=$(path_key "$p"); [[ -z "${done_[$k]:-}" ]] || continue
+    done_[$k]=1
+    printf '%s\t%s\t%s\n' "$k" "$addr" "$r"
+  done < <(git -C "$CLONE" ls-files) > "$CLONE.elsewhere"
+}
+
 write_aliases() {
   # An alias names a project, so it goes only to that project's own storage.
   local addr=$1 old new
@@ -524,7 +552,20 @@ sync_store() {
   if [[ -d "$lock" && -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]]; then
     rmdir "$lock" 2>/dev/null
   fi
-  mkdir "$lock" 2>/dev/null || { say "$ADDR: another sync is running"; return 0; }
+  if ! mkdir "$lock" 2>/dev/null; then
+    # A hook steps aside: the running sync does the work. A person waits for it, or
+    # hears that nothing was done, since a quiet exit would look like success.
+    [[ $QUIET -eq 1 ]] && return 0
+    local waited=0
+    printf '%s: another sync is running, waiting\n' "$ADDR" >&2
+    while ! mkdir "$lock" 2>/dev/null; do
+      if (( waited >= LOCK_WAIT )); then
+        printf '%s: another sync is still running, not synced. Try again later\n' "$ADDR" >&2
+        return 1
+      fi
+      sleep 1; waited=$((waited + 1))
+    done
+  fi
 
   if [[ ! -d "$CLONE/.git" ]]; then
     first=1
@@ -591,6 +632,7 @@ sync_store() {
   fi
   git -C "$CLONE" rev-parse -q --verify HEAD > "$CLONE.base" 2>/dev/null
   write_seen "$ADDR"
+  write_elsewhere "$ADDR"
   write_state "$CLONE" ok ""
   say "$ADDR: synced"
   rmdir "$lock"
@@ -762,7 +804,10 @@ cmd_status() {
     printf '%s\n  state: %s%s%s\n  files here: %s, commits not pushed: %s\n' "$addr" "$st" "${rest:+ ($rest)}" \
       "${ts:+, $(date -d "@$ts" '+%F %T' 2>/dev/null || date -r "$ts" '+%F %T' 2>/dev/null)}" "$(routed_files "$addr" | wc -l | tr -d ' ')" "$ahead"
     if [[ $moved -gt 0 ]]; then
-      printf '  %d files here are now routed elsewhere. They stay in this storage and its history until removed by hand.\n' "$moved"
+      printf '  %d files here are routed elsewhere by this machine. On a new machine that usually means a missing [project] rule in %s; after a deliberate move they stay here and in history until removed by hand.\n' "$moved" "$LOCAL_CONF"
+      if [[ -s "$clone.elsewhere" ]]; then
+        awk -F'\t' '{ printf "    %s -> %s\n", $1, $3 }' "$clone.elsewhere"
+      fi
     fi
   done
 }

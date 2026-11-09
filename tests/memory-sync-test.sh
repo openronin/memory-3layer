@@ -144,6 +144,17 @@ ok "project + layer wins" "$(git -C "$W" show main:$K/SESSION.md)" s1b
 case "$(on e sync status)" in *"routed elsewhere"*) r=y ;; *) r=n ;; esac; ok "status warns about the old storage" $r y
 ok "old storage keeps it, no deletion" "$(has "$P" "$K/SESSION.md")" 0
 
+# A new machine uses the work storage, but has no rule for one of its projects yet.
+mkdir -p "$T/nr"; mkdir -p "$(dirname "$(conf nr)")"
+printf 'default = %s\n[project github.com/o/r]\ndefault = %s\n' "$P" "$W" > "$(conf nr)"
+on nr sync --quiet
+ok "missing route: the project is not laid out" "$(exists nr "$K2/project.md")" 1
+mkdir -p "$T/nr2"; git -C "$T/nr2" init -q; git -C "$T/nr2" remote add origin git@gitlab.example.com:t/app.git
+case "$(cd "$T/nr2" && HOME="$T/nr" bash "$BIN" context </dev/null)" in *"SYNC ROUTE"*"[project gitlab.example.com/t/app]"*) r=y ;; *) r=n ;; esac
+ok "missing route: the session on that project is told" $r y
+case "$(cd "$T"; HOME="$T/nr" bash "$BIN" context </dev/null)" in *"SYNC ROUTE"*) r=y ;; *) r=n ;; esac
+ok "missing route: other sessions are not" $r n
+
 # --- routing travels, local rule wins ---
 S3=$(bare routed); W3=$(bare routedwork)
 mkdir -p "$T/g" "$T/h"
@@ -336,7 +347,9 @@ mk o "$K/project.md" p2; on o sync --pull --quiet
 ok "pull mode doesn't push" "$(git -C "$Q" show main:$K/project.md)" p1
 on o sync --quiet; ok "next sync pushes" "$(git -C "$Q" show main:$K/project.md)" p2
 L2=$(ls -d "$T/o/.local/state/memory-3layer/stores/"*/ | head -1); mkdir "${L2%/}.lock"
-case "$(on o sync)" in *"another sync"*) r=y ;; *) r=n ;; esac; ok "a second sync steps aside" $r y
+case "$(MEMORY_3LAYER_LOCK_WAIT=1 on o sync 2>&1)" in *"still running, not synced"*) r=y ;; *) r=n ;; esac; ok "a second sync by hand says it did nothing" $r y
+MEMORY_3LAYER_LOCK_WAIT=1 on o sync >/dev/null 2>&1; ok "a second sync by hand fails" $? 1
+on o sync --quiet; ok "a second sync from a hook steps aside" $? 0
 rmdir "${L2%/}.lock"
 mkdir -p "$T/p"; V=$(bare hook)
 mk p "$K/project.md" h1
