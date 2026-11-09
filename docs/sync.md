@@ -103,7 +103,7 @@ Triggers:
 
 A harness with no suitable hook relies on the session start of the next session, or on the command.
 
-A running session sees another machine's changes when it next reads a file. The context injected at its start isn't refreshed.
+A running session sees another machine's changes when it next reads a file. The context injected at its start isn't refreshed, with one exception: tasks. A sync notes in `~/.local/state/memory-3layer/arrived` every journal it brought (new, updated, closed), and the next hook after a tool call in that project tells the agent their names. Only one session hears of them: the first one in the project to run a tool, or to start. `memory-3layer sync` prints them as well.
 
 A session can write while a sync runs. A write made after the sync copied the file out stays in the data directory and goes out with the next sync.
 

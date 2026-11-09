@@ -47,4 +47,5 @@ Report the Codex version with the results.
 8. **Skills.** `$protocol` and `$recall` are found, and `$memstat` runs its script.
 9. **Sync in hooks.** With a storage set, run `memory-3layer sync status` by the `Client:` path after a session ends. The time moved, which means hooks aren't stopped by the sandbox from using the network and `~/.local/state`. The docs don't say whether hooks are sandboxed.
 10. **Pre-compact.** Before compaction, whether the reminder reaches the agent. It is sent as `systemMessage`, which the Codex docs describe as a warning in the interface. If the agent doesn't see it, the hook needs another output.
-11. **Line endings.** With `core.autocrlf=true`, the client still starts after install.
+11. **Tasks from another machine.** Open a task on another machine and sync it there. In a running session here, after the next background sync, a tool call brings the agent a line naming the task. It is sent as `additionalContext` on PostToolUse; if the agent doesn't see it, the hook needs another output.
+12. **Line endings.** With `core.autocrlf=true`, the client still starts after install.

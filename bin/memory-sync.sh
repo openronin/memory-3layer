@@ -41,6 +41,7 @@ declare -A RULE=()
 declare -A ACCESS=()
 NET_WHY=""
 declare -A SKIPPED=()
+ARRIVED=()
 
 say() { [[ $QUIET -eq 1 ]] || printf '%s\n' "$*"; }
 
@@ -456,6 +457,29 @@ copy_in() {
   return 0
 }
 
+note_arrivals() {
+  # note_arrivals <addr> <commit before the merge>: tasks the merge brought from another
+  # machine. They go to $STATE/arrived, and the client tells the session on that project:
+  # its task index is from the session start and would miss them.
+  local addr=$1 pre=$2 st p rest kind
+  while IFS=$'\t' read -r st p; do
+    [[ "$p" == projects/*/_tasks/*.md && "$p" != */superseded/* && "$p" != *.files/* ]] || continue
+    [[ -z "${SKIPPED[$p]:-}" && "$(route_path "$p")" == "$addr" ]] || continue
+    case "$p:$st" in
+      */_tasks/archive/*:A) kind=closed ;;
+      */_tasks/archive/*) continue ;;
+      *:A) kind=new ;;
+      *) kind=updated ;;
+    esac
+    rest=${p#projects/}; rest=${rest%%/_tasks/*}
+    p=${p##*/}
+    ARRIVED+=("$rest"$'\t'"${p%.md}"$'\t'"$kind")
+    mkdir -p "$STATE"
+    printf '%s\t%s\t%s\n' "$rest" "${p%.md}" "$kind" >> "$STATE/arrived"
+  done < <(if [[ -n "$pre" ]]; then git -C "$CLONE" diff --name-status --no-renames --diff-filter=AM "$pre" HEAD
+           else git -C "$CLONE" ls-files | sed 's/^/A\t/'; fi)
+}
+
 write_state() {
   # write_state <clone> <ok|fail> <detail>. Read by `status` and by the session context.
   printf '%s\t%s\t%s\t%s\n' "$2" "$(date +%s)" "$ADDR" "$3" > "$1.state"
@@ -520,6 +544,7 @@ sync_store() {
   [[ -n "$base" ]] || pre=""
   merge_remote
   copy_in "$ADDR" "$pre"
+  note_arrivals "$ADDR" "$pre"
 
   if [[ "$MODE" == full ]] && git -C "$CLONE" rev-parse -q --verify HEAD >/dev/null 2>&1; then
     if ! net_git -C "$CLONE" push -q origin "$BRANCH"; then
@@ -528,6 +553,7 @@ sync_store() {
       if net_git -C "$CLONE" fetch -q origin; then
         merge_remote
         copy_in "$ADDR" "$pre"
+        note_arrivals "$ADDR" "$pre"
       fi
       if ! net_git -C "$CLONE" push -q origin "$BRANCH"; then
         git -C "$CLONE" rev-parse HEAD > "$CLONE.base"
@@ -562,6 +588,10 @@ cmd_sync() {
   for addr in "${stores[@]:1}"; do
     sync_store "$addr" || failed=1
   done
+  if [[ $QUIET -eq 0 && ${#ARRIVED[@]} -gt 0 ]]; then
+    echo "Tasks changed on another machine:"
+    printf '%s\n' "${ARRIVED[@]}" | awk -F'\t' '{ printf "  %s: %s (%s)\n", $1, $2, $3 }'
+  fi
   return $failed
 }
 

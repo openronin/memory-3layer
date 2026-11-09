@@ -372,6 +372,15 @@ mkdir -p "$T/jd"; mkdir -p "$(dirname "$(conf jd)")"; printf 'default = %s\n' "$
 mk jd "$JK/_tasks/m.md" "$(rec 2026-01-01T00:00:03Z-dddd note 'from d')"
 on jd sync --quiet
 ok "first sync joins a journal" "$(grep -c '^## ' "$(data jd)/$JK/_tasks/m.md")" 4
+# tasks from another machine reach the session working on the project, once
+on jb sync --quiet
+{ rec 2026-01-01T00:00:05Z-eeee open "new goal"; } > "$(data ja)/$JK/_tasks/fresh.md"
+on ja sync --quiet
+case "$(on jb sync)" in *"github.com/j/r: fresh (new)"*) r=y ;; *) r=n ;; esac; ok "arrivals: sync prints them" $r y
+mkdir -p "$T/jr"; git -C "$T/jr" init -q; git -C "$T/jr" remote add origin git@github.com:j/r.git
+hook() { (cd "$T/jr" && printf '{"hook_event_name":"PostToolUse","session_id":"s"}' | HOME="$T/jb" bash "$BIN" sync tick 3600); }
+case "$(hook)" in *additionalContext*"fresh (new)"*) r=y ;; *) r=n ;; esac; ok "arrivals: the hook tells the agent" $r y
+ok "arrivals: only once" "$(hook)" ""
 
 # --- a session writes while a sync runs ---
 # A git shim makes the write land between copy_out and copy_in.

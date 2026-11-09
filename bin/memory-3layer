@@ -184,6 +184,34 @@ sync_notes() {
   fi
 }
 
+take_arrived() {
+  # Tasks sync brought from another machine for this project, one line each, then dropped:
+  # only one session hears of them. The other projects' lines stay for their sessions.
+  local f="$STATE_DIR/arrived" tmp key
+  [[ -s "$f" ]] || return 0
+  key=$(project_key 2>/dev/null) || return 0
+  tmp="$f.$$"
+  mv -f "$f" "$tmp" 2>/dev/null || return 0
+  awk -F'\t' -v k="$key" '$1 != k' "$tmp" >> "$f"
+  awk -F'\t' -v k="$key" '$1 == k {
+      if (!($2 in kind)) order[++n] = $2
+      if ($3 == "closed" || !($2 in kind) || kind[$2] != "new") kind[$2] = $3
+    }
+    END { for (i = 1; i <= n; i++) print order[i] " (" kind[order[i]] ")" }' "$tmp"
+  rm -f "$tmp"
+}
+
+cmd_tick_notes() {
+  # After a tick on PostToolUse: tell the agent about tasks that came in with a sync.
+  local input="" list
+  [[ -t 0 ]] || IFS= read -r -d '' -t 1 input || true
+  [[ "$input" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"PostToolUse\" ]] || return 0
+  list=$(take_arrived | paste -sd, - | sed 's/,/, /g')
+  [[ -n "$list" ]] || return 0
+  printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"%s"}}\n' \
+    "$(json_escape "TASKS CHANGED ON ANOTHER MACHINE, brought by sync just now: $list. The task index from the session start doesn't have this. Before continuing one of them, or if it bears on the current work, read it with memory-3layer task show <name>.")"
+}
+
 tasks() {
   MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" \
     MEMORY_3LAYER_PROJECT="$(project_dir)" MEMORY_3LAYER_KEY="$(project_key)" \
@@ -258,6 +286,8 @@ cmd_context() {
     [[ "$input" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]+)\" ]] && session=${BASH_REMATCH[1]}
   fi
   local text; text=$(context_text "$session")
+  # The task index in this context is current, so what sync brought earlier is in it.
+  take_arrived >/dev/null
   if [[ "$format" == hook ]]; then
     printf '{"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' "$event" "$(json_escape "$text")"
   else
@@ -540,7 +570,12 @@ case "$cmd" in
   key) project_key "${1:-$PWD}"; echo ;;
   task|core|state) tasks "$cmd" "$@" ;;
   context) cmd_context "$@" ;;
-  sync) MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" exec bash "$SELF_DIR/memory-sync.sh" "$@" ;;
+  sync)
+    if [[ "${1:-}" == tick ]]; then
+      MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" bash "$SELF_DIR/memory-sync.sh" "$@" </dev/null
+      rc=$?; cmd_tick_notes; exit $rc
+    fi
+    MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" exec bash "$SELF_DIR/memory-sync.sh" "$@" ;;
   migrate)
     if (( BASH_VERSINFO[0] < 4 )); then
       b=$(bash4) || die "migrate needs bash 4 or newer. On macOS: brew install bash"
