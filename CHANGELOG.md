@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Task journals: a `checkpoint` record holds the state of a long task. `task show` prints the latest one whole and only the decisions and notes after it. The client asks for one once 40 KB is logged since the last (`TASK_CHECKPOINT_BYTES`).
 - Fixed: sync could delete from a storage files this machine never laid out (a base left by another client, a route added later), and the deletion reached the other machines. Now only a file this machine had at its last sync counts as deleted, and more than 10 deletions at once wait for `sync --allow-deletes`.
 - Sync tells the session on a project when a storage holds its memory but this machine routes it elsewhere, usually a `[project]` rule missing on a new machine. `sync status` lists such projects.
 - `sync` run by hand waits up to 30 s for a running sync, then fails instead of reporting success. Hooks still step aside.

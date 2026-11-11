@@ -156,6 +156,21 @@ hasnt "show: oldest decision dropped" "$out" "decision 2"
 has "show: all decisions in the log" "$(m task show ship --log | grep -c 'decision [0-9]')" "7"
 out=$(TASK_SHOW_DECISIONS=10 m task show ship); has "cap is configurable" "$out" "Decisions:"
 
+# --- checkpoint ---
+echo "long work" | m task open long >/dev/null
+echo "old finding" | m task log long note >/dev/null
+hasnt "under the limit: no checkpoint asked" "$(m task show long)" "CHECKPOINT DUE"
+has "over the limit: log asks for a checkpoint" "$(echo "more" | TASK_CHECKPOINT_BYTES=50 m task log long note)" "CHECKPOINT DUE"
+has "over the limit: the index says so" "$(TASK_CHECKPOINT_BYTES=50 m state)" "long [active, checkpoint due]"
+head -c 300 /dev/zero | tr '\0' x | TASK_CHECKPOINT_MAX_BYTES=200 m task log long checkpoint >/dev/null 2>&1; ok "oversized checkpoint refused" $? 2
+ok "checkpoint written, nothing due after it" "$(printf 'state line one\nstate line two\n' | TASK_CHECKPOINT_BYTES=50 m task log long checkpoint)" ""
+echo "new finding" | m task log long note >/dev/null
+out=$(m task show long)
+has "show gives the checkpoint whole" "$out" "state line two"
+hasnt "show drops notes before the checkpoint" "$out" "old finding"
+has "show keeps notes after it" "$out" "new finding"
+echo done | m task close long >/dev/null
+
 # --- files ---
 F=$(m task files ship); ok "files prints the directory" "$F" "$J/ship.files"
 ok "files creates it" "$(test -d "$F"; echo $?)" 0

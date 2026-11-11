@@ -38,7 +38,7 @@ Markdown, so a person can read it and search can index it. The header line is st
 
 The header holds a UTC time with a random suffix (the record's id; two machines can't collide), the type, and the session. The client writes all of it.
 
-Types: `open`, `note`, `decision`, `next`, `blocker`, `close`. Task state is computed from the records:
+Types: `open`, `note`, `decision`, `next`, `blocker`, `checkpoint`, `close`. Task state is computed from the records:
 
 - status: `done` after `close`; `blocked` if a `blocker` is the latest of `blocker` and `next`; otherwise `active`;
 - stale: no record for `TASK_STALE_DAYS`, 7 by default;
@@ -51,7 +51,7 @@ The body always comes through stdin, so an agent can't trip over quoting.
     memory-3layer task open <slug>              # stdin: the goal
     memory-3layer task log <slug> <type>        # stdin: the record
     memory-3layer task resume <slug>            # bind this session, print the task's state
-    memory-3layer task show <slug>              # state: goal, next, the last TASK_SHOW_DECISIONS decisions (5), the last TASK_SHOW_NOTES notes (2), each cut at TASK_SHOW_NOTE_CHARS (1500)
+    memory-3layer task show <slug>              # state: goal, the last checkpoint whole, next, and after that checkpoint the last TASK_SHOW_DECISIONS decisions (5), the last TASK_SHOW_NOTES notes (2), each cut at TASK_SHOW_NOTE_CHARS (1500)
     memory-3layer task show <slug> --log        # the whole journal
     memory-3layer task show <slug> --brief      # one line, as in the index
     memory-3layer task files <slug>             # prints the task's files directory, creating it
@@ -68,6 +68,16 @@ The guard blocks direct writes to `_tasks/`, including shell redirects. A mistak
 The index shows the start of the last `next`. When that record first tells what was done and the step comes after a `next:` or `Дальше:` marker, the index shows the step. The session context says what each record type is for, because a long session loses the convention after a compaction: `note` is what was done and learned, `decision` a choice and why, `next` the step ahead.
 
 Files a task needs beyond the session, such as scripts for a later rollback, go into the directory `task files <slug>` prints: `_tasks/<slug>.files/`. The guard lets those be written directly, and `task close` moves the directory to the archive with the journal.
+
+## Checkpoints
+
+Distillation is tied to `close`, and a long task doesn't close. Its journal grows (187 KB and 215 records in nine days on one real task), `task show` keeps giving the last five decisions and two notes, and the rest is reachable only through `--log`, which nobody reads at that size. The file's size itself costs nothing: the context gets the same 12 KB.
+
+So a task gets a `checkpoint` record: the state of the whole task, written by the agent for one that sees nothing else. `task show` prints the latest checkpoint whole and lists only the decisions and notes after it. A checkpoint is limited to `TASK_CHECKPOINT_MAX_BYTES`, 10000 by default, and a larger one is refused, because it is shown every time.
+
+When the records after the last checkpoint pass `TASK_CHECKPOINT_BYTES`, 40000 by default and `0` for never, the index marks the task `checkpoint due`, and `task log` and `task show` ask for one on every call. Nothing is refused: a refused record is a lost record. The pre-compaction reminder asks too, since that is the last moment the agent still has the whole context.
+
+Records stay in the journal. Moving the older ones out would need a rule for sync, where another machine's copy brings them back, and the file's size has shown no cost.
 
 ## Closing a task
 

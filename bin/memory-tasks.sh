@@ -20,6 +20,9 @@ NEXT_STALE_DAYS="${TASK_NEXT_STALE_DAYS:-3}"
 SHOW_NOTES="${TASK_SHOW_NOTES:-2}"
 SHOW_NOTE_CHARS="${TASK_SHOW_NOTE_CHARS:-1500}"
 SHOW_DECISIONS="${TASK_SHOW_DECISIONS:-5}"
+# A checkpoint is due when this much was logged after the last one; 0 turns it off.
+CHECKPOINT_DUE="${TASK_CHECKPOINT_BYTES:-40000}"
+CHECKPOINT_MAX="${TASK_CHECKPOINT_MAX_BYTES:-10000}"
 BRIEF_BYTES="${CORE_BRIEF_BYTES:-5000}"
 CORE_SOFT="${CORE_SOFT_BYTES:-20000}"
 CORE_HARD="${CORE_HARD_BYTES:-40000}"
@@ -27,7 +30,7 @@ RECENT=5
 SESSION="${CLAUDE_CODE_SESSION_ID:-}"
 
 # No {n} intervals: mawk doesn't take them everywhere.
-HEADER='^## [0-9-]+T[0-9:]+Z-[0-9a-f]+ (open|note|decision|next|blocker|close) s:[^ ]+$'
+HEADER='^## [0-9-]+T[0-9:]+Z-[0-9a-f]+ (open|note|decision|next|blocker|checkpoint|close) s:[^ ]+$'
 
 die() { printf 'memory-3layer: %s\n' "$*" >&2; exit 2; }
 
@@ -111,6 +114,27 @@ summary() {
     }' "$1"
 }
 
+since_checkpoint() {
+  # Bytes of the records after the last checkpoint, or of the whole journal without one.
+  local ln
+  ln=$(awk -v h="$HEADER" '$0 ~ h { if ($3 == "checkpoint") ln = 0; else if (!ln) ln = NR } END { print ln + 0 }' "$1")
+  if [[ "$ln" -eq 0 ]]; then echo 0; else tail -n +"$ln" "$1" | wc -c | tr -d ' '; fi
+}
+
+checkpoint_due() {
+  # A long task never reaches `close`, where its knowledge would be distilled, and
+  # `task show` gives only the last records. So past the limit a checkpoint is asked for.
+  [[ "$CHECKPOINT_DUE" -gt 0 ]] || return 1
+  DUE_BYTES=$(since_checkpoint "$1")
+  [[ "$DUE_BYTES" -ge "$CHECKPOINT_DUE" ]]
+}
+
+checkpoint_note() {
+  # checkpoint_note <slug> <file>
+  checkpoint_due "$2" || return 0
+  printf 'CHECKPOINT DUE: %s has %d KB of records not covered by a checkpoint, and `task show` gives only the last of them. Write one now: memory-3layer task log %s checkpoint, at most %d KB. It is the state of the whole task for an agent that sees nothing else: what is built and how it works, the decisions in force, how to check it, what is open. Move what must outlive the task into CORE.md.\n' "$1" $((DUE_BYTES / 1000)) "$1" $((CHECKPOINT_MAX / 1000))
+}
+
 age_days() {
   local e; e=$(date -d "${1%-*}" +%s 2>/dev/null) || { echo 0; return; }
   echo $(( ($(date +%s) - e) / 86400 ))
@@ -131,6 +155,7 @@ index_line() {
     days=$(age_days "$nt")
     [[ "$days" -lt "$NEXT_STALE_DAYS" ]] || status="$status, next ${days}d old"
   fi
+  [[ "$status" == done ]] || ! checkpoint_due "$f" || status="$status, checkpoint due"
   printf '%s [%s] %s\n' "$slug" "$status" "$text"
 }
 
@@ -160,6 +185,7 @@ index() {
 
 show() {
   # The state of a task: everything an agent needs to continue, the last notes, and no older history.
+  # A checkpoint stands for the records before it, so only later decisions and notes are listed.
   local slug=$1 f status nt days=0; f=$2
   IFS=$'\x1f' read -r status _ _ _ _ nt < <(summary "$f" | tr '\t' '\037')
   [[ "$status" == done || -z "$nt" ]] || days=$(age_days "$nt")
@@ -168,6 +194,7 @@ show() {
     $0 ~ h {
       t = $3; n++
       if (t == "next") nx = ""; else if (t == "blocker") bl = ""
+      if (t == "checkpoint") { cp = ""; cpd = substr($2, 1, 10); nd = 0; nn = 0 }
       if (t == "decision") { nd++; dec[nd] = "- " substr($2, 1, 10) ": " }
       if (t == "note") { nn++; note[nn] = "- " substr($2, 1, 10) ": " }
       if (t == "blocker") kind = t; else if (t == "next") kind = t
@@ -181,20 +208,23 @@ show() {
       else if (t == "blocker") bl = bl line
       else if (t == "decision") dec[nd] = dec[nd] line
       else if (t == "note") note[nn] = note[nn] line
+      else if (t == "checkpoint") cp = cp line
       else if (t == "close") res = res line
     }
     END {
       sub(/\n+$/, "", goal); sub(/\n+$/, "", nx); sub(/\n+$/, "", bl); sub(/\n+$/, "", res)
+      sub(/\n+$/, "", cp); since = cpd == "" ? "" : " since the checkpoint"
       if (goal != "") print "Goal: " goal
+      if (cpd != "") print "Checkpoint " cpd ":\n" cp
       if (kind == "blocker" && bl != "") print "Blocker: " bl
       if (nx != "") print "Next: " nx
       if (days >= limit) print "(next is " days "d old: check it against what was done before continuing)"
       if (nd > 0 && keepd > 0) {
-        print (nd > keepd ? "Last " keepd " decisions of " nd " (the rest are in --log):" : "Decisions:")
+        print (nd > keepd ? "Last " keepd " decisions of " nd since " (the rest are in --log):" : "Decisions" since ":")
         for (i = (nd > keepd ? nd - keepd + 1 : 1); i <= nd; i++) { sub(/\n+$/, "", dec[i]); print dec[i] }
       }
       if (nn > 0 && keep > 0) {
-        print (nn > keep ? "Last " keep " notes of " nn ":" : "Notes:")
+        print (nn > keep ? "Last " keep " notes of " nn since ":" : "Notes" since ":")
         for (i = (nn > keep ? nn - keep + 1 : 1); i <= nn; i++) {
           sub(/\n+$/, "", note[i])
           print (length(note[i]) > cap ? substr(note[i], 1, cap) "... (the whole note is in --log)" : note[i])
@@ -203,6 +233,7 @@ show() {
       if (res != "") print "Result: " res
       print "(" n " records; --log shows them all, --brief one line)"
     }' "$f"
+  [[ "$status" == done ]] || checkpoint_note "$slug" "$f"
 }
 
 # --- task commands ------------------------------------------------------------
@@ -236,13 +267,16 @@ cmd_open() {
 }
 
 cmd_log() {
-  [[ $# -eq 2 ]] || die "usage: task log <name> <note|decision|next|blocker>, the text on stdin"
-  case "$2" in note|decision|next|blocker) ;; *) die "bad record type '$2': note, decision, next or blocker" ;; esac
+  [[ $# -eq 2 ]] || die "usage: task log <name> <note|decision|next|blocker|checkpoint>, the text on stdin"
+  case "$2" in note|decision|next|blocker|checkpoint) ;; *) die "bad record type '$2': note, decision, next, blocker or checkpoint" ;; esac
   valid_slug "$1"
   local f; f=$(need_active "$1") || exit 2
   read_body "the record"
+  # Shown whole in every `task show`, so it stays a summary.
+  [[ "$2" != checkpoint || $(printf '%s' "$BODY" | wc -c) -le $CHECKPOINT_MAX ]] || die "a checkpoint is at most $((CHECKPOINT_MAX / 1000)) KB, and this one is $(( $(printf '%s' "$BODY" | wc -c) / 1000 )) KB: keep the state, leave the history to the notes"
   with_lock "$f" append "$f" "$2" "$BODY" || die "cannot write $f"
   bind "$1"
+  checkpoint_note "$1" "$f"
   return 0
 }
 
