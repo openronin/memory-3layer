@@ -122,8 +122,9 @@ since_checkpoint() {
 }
 
 last_checkpoint_bytes() {
-  # Body size of the latest checkpoint, 0 without one.
-  awk -v h="$HEADER" '$0 ~ h { in_cp = ($3 == "checkpoint"); if (in_cp) n = 0; next } in_cp { n += length($0) + 1 } END { print n + 0 }' "$1"
+  # Body size of the latest checkpoint in bytes, 0 without one. In a UTF-8 locale awk
+  # counts characters, half the bytes of Cyrillic text.
+  LC_ALL=C awk -v h="$HEADER" '$0 ~ h { in_cp = ($3 == "checkpoint"); if (in_cp) n = 0; next } in_cp { n += length($0) + 1 } END { print n + 0 }' "$1"
 }
 
 checkpoint_due() {
