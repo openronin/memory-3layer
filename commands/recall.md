@@ -36,6 +36,8 @@ Optional flags:
    - `--here`: `memory-3layer search --here "<USER_QUERY>"`. It lists the ranked files of this project; read the ones that fit. qmd has no path filter, so hybrid mode can't be limited to one project.
    - `-c <name>` / `-n <N>`: pass through to qmd
 
+   Without qmd, `memory-3layer search` matches plain text and prints `== <file>` with the first matching lines (`--here`: the files only). Read the files that fit; hybrid mode is unavailable then.
+
 5. Display qmd's markdown output verbatim. Do NOT paraphrase paths/snippets. After hits, add one short orientation line (e.g. "looks like the relevant note is in `air/SESSION.md`").
 
 6. **If hybrid mode fails** (`Error loading model` / `ErrorExtensionNotPresent`): silently fall back to `qmd search`, mention it once. Common cause: Vulkan/CUDA prebuilt mismatch on Windows.

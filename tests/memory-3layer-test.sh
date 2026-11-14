@@ -239,6 +239,10 @@ printf '#a,0.9,qmd://memory-3layer/projects/github-com/o/r/SESSION.md\\n#b,0.8,q
 X
 out=$(cd "$R" && PATH="$T/fake:$PATH" m search --here x)
 ok "search --here keeps this project" "$out" "#a,0.9,qmd://memory-3layer/projects/github-com/o/r/SESSION.md"
+echo "deploy goes through Zebrafoo gate" > "$P/notes-plain.md"
+out=$(cd "$R" && PATH=/usr/bin:/bin m search zebrafoo deploy 2>/dev/null)
+ok "without qmd search still finds by plain text" "$(grep -c '^== .*/notes-plain.md$' <<< "$out")" 1
+rm "$P/notes-plain.md"
 
 # --- installer ---
 H2="$T/h2"; mkdir -p "$H2/.claude/memory"; echo me > "$H2/.claude/memory/IDENTITY.md"

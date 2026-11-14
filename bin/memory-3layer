@@ -540,7 +540,7 @@ cmd_search() {
   # search [--here] <query>: BM25 over memory. qmd has no path filter (it silently
   # ignores --filter), so --here filters its ranked file list. qmd also rewrites
   # paths, turning dots into dashes, and the key has to be compared in that form.
-  command -v qmd >/dev/null 2>&1 || die "qmd is not installed"
+  command -v qmd >/dev/null 2>&1 || { search_plain "$@"; return; }
   if [[ "${1:-}" == --here ]]; then
     shift; [[ $# -gt 0 ]] || die "usage: search [--here] <query>"
     local prefix
@@ -550,6 +550,29 @@ cmd_search() {
     [[ $# -gt 0 ]] || die "usage: search [--here] <query>"
     qmd search "$*" -c memory-3layer -n 5
   fi
+}
+
+search_plain() {
+  # Without qmd: files that contain the most of the query's words, then the most matching
+  # lines. Archives are found only by search, so no qmd must not mean no search.
+  local here=0 dir="$HOME_DIR" n=5
+  [[ "${1:-}" == --here ]] && { here=1; shift; dir="$HOME_DIR/projects/$(project_key)"; n=10; }
+  [[ $# -gt 0 ]] || die "usage: search [--here] <query>"
+  [[ -d "$dir" ]] || return 0
+  echo "qmd is not installed: plain-text search, files with the most of the words first." >&2
+  local -a words args=(); read -ra words <<< "$*"
+  local w; for w in "${words[@]}"; do args+=(-e "$w"); done
+  local files
+  files=$(for w in "${words[@]}"; do grep -rilF --include='*.md' --exclude-dir=superseded -- "$w" "$dir" 2>/dev/null; done \
+    | sort | uniq -c | sort -rn | awk '{ $1 = $1 } 1' | while read -r cnt f; do
+        printf '%d\t%d\t%s\n' "$cnt" "$(grep -ciF "${args[@]}" -- "$f")" "$f"
+      done | sort -t$'\t' -k1,1nr -k2,2nr | head -n "$n" | cut -f3)
+  [[ -n "$files" ]] || { echo "nothing found" >&2; return 0; }
+  if (( here )); then printf '%s\n' "$files"; return 0; fi
+  local f; while IFS= read -r f; do
+    echo "== $f"
+    grep -niF "${args[@]}" -- "$f" | head -n 3 | cut -c1-300
+  done <<< "$files"
 }
 
 cmd_refresh() {

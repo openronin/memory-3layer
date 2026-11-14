@@ -121,6 +121,11 @@ since_checkpoint() {
   if [[ "$ln" -eq 0 ]]; then echo 0; else tail -n +"$ln" "$1" | wc -c | tr -d ' '; fi
 }
 
+last_checkpoint_bytes() {
+  # Body size of the latest checkpoint, 0 without one.
+  awk -v h="$HEADER" '$0 ~ h { in_cp = ($3 == "checkpoint"); if (in_cp) n = 0; next } in_cp { n += length($0) + 1 } END { print n + 0 }' "$1"
+}
+
 checkpoint_due() {
   # A long task never reaches `close`, where its knowledge would be distilled, and
   # `task show` gives only the last records. So past the limit a checkpoint is asked for.
@@ -274,9 +279,15 @@ cmd_log() {
   read_body "the record"
   # Shown whole in every `task show`, so it stays a summary.
   [[ "$2" != checkpoint || $(printf '%s' "$BODY" | wc -c) -le $CHECKPOINT_MAX ]] || die "a checkpoint is at most $((CHECKPOINT_MAX / 1000)) KB, and this one is $(( $(printf '%s' "$BODY" | wc -c) / 1000 )) KB: keep the state, leave the history to the notes"
+  local prev=0 size; [[ "$2" != checkpoint ]] || prev=$(last_checkpoint_bytes "$f")
   with_lock "$f" append "$f" "$2" "$BODY" || die "cannot write $f"
   bind "$1"
   checkpoint_note "$1" "$f"
+  # A checkpoint replaces the previous one in `task show`. One written as a report on
+  # the latest stretch hides the whole state the previous one held.
+  size=$(printf '%s' "$BODY" | wc -c)
+  [[ "$2" != checkpoint ]] || (( size * 2 >= prev )) ||
+    printf 'This checkpoint (%d KB) now replaces the previous one (%d KB) in `task show`, and what only the previous one says is no longer shown. If it is not the state of the whole task, write one that is; a report on the latest work is a note.\n' $(( (size + 999) / 1000 )) $(( (prev + 999) / 1000 ))
   return 0
 }
 

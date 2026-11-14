@@ -169,6 +169,7 @@ out=$(m task show long)
 has "show gives the checkpoint whole" "$out" "state line two"
 hasnt "show drops notes before the checkpoint" "$out" "old finding"
 has "show keeps notes after it" "$out" "new finding"
+has "a much smaller checkpoint is flagged" "$(echo "short" | m task log long checkpoint)" "replaces the previous one"
 echo done | m task close long >/dev/null
 
 # --- files ---
