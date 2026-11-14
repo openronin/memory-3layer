@@ -409,6 +409,15 @@ mkdir -p "$T/jr"; git -C "$T/jr" init -q; git -C "$T/jr" remote add origin git@g
 hook() { (cd "$T/jr" && printf '{"hook_event_name":"PostToolUse","session_id":"s"}' | HOME="$T/jb" bash "$BIN" sync tick 3600); }
 case "$(hook)" in *additionalContext*"fresh (new)"*) r=y ;; *) r=n ;; esac; ok "arrivals: the hook tells the agent" $r y
 ok "arrivals: only once" "$(hook)" ""
+# a closed task whose old journal came back: the copy goes, on both machines
+mkdir -p "$(data ja)/$JK/_tasks/archive/2026-01"
+{ cat "$(data ja)/$JK/_tasks/fresh.md"; rec 2026-01-01T00:00:06Z-ffff close done; } > "$(data ja)/$JK/_tasks/archive/2026-01/fresh.md"
+on ja sync --quiet; on jb sync --quiet; on jb sync --quiet
+ok "stale copy of a closed journal dropped" "$(exists ja "$JK/_tasks/fresh.md")$(exists jb "$JK/_tasks/fresh.md")" 11
+cp "$(data ja)/$JK/_tasks/m.md" "$(data ja)/$JK/_tasks/archive/2026-01/m.md"
+{ rec 2026-01-01T00:00:08Z-acac note "new work"; } >> "$(data ja)/$JK/_tasks/m.md"
+on ja sync --quiet
+ok "a journal with records after the close stays" "$(exists ja "$JK/_tasks/m.md")" 0
 
 # --- a session writes while a sync runs ---
 # A git shim makes the write land between copy_out and copy_in.

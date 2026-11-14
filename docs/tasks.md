@@ -118,6 +118,8 @@ The layer keys in `storage.conf` and `routing.conf` keep their names: they name 
 
 Conflicts in a journal don't use "newer wins", which would lose records. Both sides' records are joined and sorted by id. `CORE.md` conflicts work like `SESSION.md` today.
 
+A machine that still has a closed task's journal can bring it back, and the task shows as active next to its archive. This happened during a move to a new PC: a closed journal came back six minutes after the close. So sync drops an active journal whose every record is already in the project's archive. Record ids are unique, so this needs no name matching.
+
 ## Migration
 
 `memory-3layer core init` renames this project's `SESSION.md` to `CORE.md` and adds an empty `# Brief`. The agent moves active work into tasks by hand: nothing can tell a task from a note automatically. The client keeps reading `SESSION.md` for a project without `CORE.md`, so projects move one at a time.
@@ -143,4 +145,4 @@ After two weeks of real work on this repository:
 - Verbatim recent turns: a hook would do this mechanically, but that bypasses "the agent writes the memory". Left out of the first version; `CORE.md` and journals have to show whether they're missed.
 - Search over tasks and archives: a separate review after the first version. Journals and archives are plain markdown, so qmd indexes them as they are.
 - Codex: session id and hook behaviour are unverified.
-- A task closed on one machine while another keeps logging to it comes back as active, with the archive beside it. To be seen whether this happens in practice.
+- A task closed on one machine while another keeps logging to it comes back as active, with the archive beside it. That copy holds records written after the close, so it stays and shows as active.

@@ -348,6 +348,28 @@ copy_out() {
   return 0
 }
 
+drop_stale_journals() {
+  # An active journal whose every record is already in the project's archive is a copy
+  # from before the close, brought back by a machine that had it, and the task shows as
+  # active again. It goes; remove_deleted then takes it out of the storage. A journal
+  # with records after the close is new work and stays.
+  # Record ids are unique, so any archived journal of the project will do.
+  local addr=$1 p k ids re='s/^## ([0-9-]+T[0-9:]+Z-[0-9a-f]+) [a-z]+ s:[^ ]+$/\1/p'
+  local -a arch
+  while IFS= read -r p; do
+    [[ "$p" == projects/*/_tasks/*.md && "$p" != */_tasks/*/* ]] || continue
+    k=${p%%/_tasks/*}
+    arch=("$DATA/$k"/_tasks/archive/*/*.md)
+    [[ -e "${arch[0]}" ]] || continue
+    ids=$(sed -nE "$re" "$DATA/$p")
+    [[ -n "$ids" ]] || continue
+    grep -vxqF -f <(sed -nE "$re" "${arch[@]}") <<< "$ids" && continue
+    rm -f "$DATA/$p"
+    p=${p##*/}; say "${k#projects/}: task ${p%.md} is closed, dropped a stale copy of its journal"
+  done < <(routed_files "$addr")
+  return 0
+}
+
 remove_deleted() {
   # A file this machine had in its data dir at the last sync, and that is gone now,
   # was deleted on purpose. Only files from this machine's own list count: the base
@@ -602,6 +624,7 @@ sync_store() {
   base=$(cat "$CLONE.base" 2>/dev/null || true)
   [[ -n "$base" ]] || first=1
   SKIPPED=()
+  drop_stale_journals "$ADDR"
   copy_out "$ADDR" "$first"
   remove_deleted "$ADDR"
   write_aliases "$ADDR"

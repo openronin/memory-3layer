@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Task journals: a `checkpoint` record holds the state of a long task. `task show` prints the latest one whole and only the decisions and notes after it. The client asks for one once 40 KB is logged since the last (`TASK_CHECKPOINT_BYTES`). A checkpoint less than half the size of the previous one is flagged: it replaces the previous one in `task show`.
+- Sync drops an active journal whose every record is already archived: a copy from before the close that another machine brought back, which showed the task as active again.
 - `search` without qmd falls back to plain-text matching instead of failing: archives are reached only through search.
 - Fixed: sync could delete from a storage files this machine never laid out (a base left by another client, a route added later), and the deletion reached the other machines. Now only a file this machine had at its last sync counts as deleted, and more than 10 deletions at once wait for `sync --allow-deletes`.
 - Sync tells the session on a project when a storage holds its memory but this machine routes it elsewhere, usually a `[project]` rule missing on a new machine. `sync status` lists such projects.
