@@ -249,7 +249,7 @@ TEXT
   [[ -f "$pd/project.md" ]] && printf '\nProject notes: %s. Read them before your first response.\n' "$pd/project.md"
   cat <<TEXT
 
-Client: $SELF_DIR/memory-3layer. Rules: the protocol skill, or CLAUDE.md.
+Client: $SELF_DIR/memory-3layer. Rules: the protocol skill, or the repo entry (CLAUDE.md / AGENTS.md).
 
 Work with more than one step, or that can outlive this session, is a task. Pass the text on stdin:
   memory-3layer task open <name> | task resume <name> | task show <name> [--log|--brief] | task list

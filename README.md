@@ -50,9 +50,16 @@ Claude Code:
 /plugin install memory-3layer@memory-3layer
 ```
 
+Qwen Code:
+
+```bash
+qwen plugins marketplace add openronin/memory-3layer-qwen-code
+qwen plugins install memory-3layer@memory-3layer
+```
+
 Restart the session. Nothing leaves the machine until you set a storage.
 
-Other routes and optional tools: [INSTALL.md](INSTALL.md). Codex CLI, not yet run on a real Codex: [docs/codex.md](docs/codex.md). Coming from an older version: [docs/migration.md](docs/migration.md).
+Other routes and optional tools: [INSTALL.md](INSTALL.md). Qwen Code: [docs/qwen.md](docs/qwen.md). Codex CLI, not yet run on a real Codex: [docs/codex.md](docs/codex.md). Coming from an older version: [docs/migration.md](docs/migration.md).
 
 ## Use
 
@@ -65,7 +72,7 @@ In a session you mostly talk to the agent: "запомни" or "remember" promot
 | `/memory status\|auto on\|auto off\|refresh\|rotate` | Memory controls; `rotate` moves closed work to the archive |
 | `/memstat` | Search processes and index progress |
 
-In Claude Code, plugin skills are named `/memory-3layer:recall` and so on. The client:
+In Claude Code and Qwen Code, plugin skills are named `/memory-3layer:recall` and so on. The client:
 
 ```bash
 memory-3layer sync init <git address>   # set the default storage

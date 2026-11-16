@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        harness: [claude-code, codex]
+        harness: [claude-code, codex, qwen-code]
     steps:
       - uses: actions/checkout@v4
       - name: version

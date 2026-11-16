@@ -187,7 +187,7 @@ is_memory_path() {
     "$MEMORY_HOME"/*|"~${MEMORY_HOME#"$HOME"}"/*) return 0 ;;
   esac
   case "$1" in
-    */.claude/memory/*|*/.claude/projects/*/memory/*|*/.claude-docs/*|*/CLAUDE.md|*/AGENTS.md|*/IDENTITY.md|*/SESSION*.md|*/CORE*.md) return 0 ;;
+    */.claude/memory/*|*/.claude/projects/*/memory/*|*/.qwen/memory/*|*/.qwen/projects/*/memory/*|*/.claude-docs/*|*/CLAUDE.md|*/AGENTS.md|*/IDENTITY.md|*/SESSION*.md|*/CORE*.md) return 0 ;;
   esac
   return 1
 }

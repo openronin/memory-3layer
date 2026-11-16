@@ -27,6 +27,15 @@ claude plugin update memory-3layer@memory-3layer
 
 See [docs/codex.md](docs/codex.md).
 
+## Qwen Code
+
+```bash
+qwen plugins marketplace add openronin/memory-3layer-qwen-code
+qwen plugins install memory-3layer@memory-3layer
+```
+
+Restart the session. Inside Qwen Code `memory-3layer` is on `PATH` too. Differences from Claude Code, and how to install from this repository before a release: [docs/qwen.md](docs/qwen.md).
+
 ## Manual install
 
 For a machine without the plugin system. It copies files into `~/.claude` (or `$CLAUDE_HOME`) and links the client into `~/.local/bin`.
@@ -49,7 +58,7 @@ Changed files are saved as `.bak-<timestamp>`. Your identity, project memory and
    ```
 
    Separate storages for work and personal projects: [docs/sync.md](docs/sync.md).
-3. **Set up a project.** Ask the agent: "set up in-repo L1 for this project". It creates `CLAUDE.md` and `.claude-docs/` from the templates, and you commit them.
+3. **Set up a project.** Ask the agent: "set up in-repo L1 for this project". It creates `CLAUDE.md` (`AGENTS.md` in Qwen Code) and `.claude-docs/` from the templates, and you commit them.
 
 ## New machine
 

@@ -50,9 +50,16 @@ Claude Code:
 /plugin install memory-3layer@memory-3layer
 ```
 
+Qwen Code:
+
+```bash
+qwen plugins marketplace add openronin/memory-3layer-qwen-code
+qwen plugins install memory-3layer@memory-3layer
+```
+
 Перезапустите сессию. Пока не задано хранилище, ничего не покидает машину.
 
-Другие способы и необязательные инструменты: [INSTALL.md](INSTALL.md). Codex CLI, ещё не проверенный на настоящем Codex: [docs/codex.md](docs/codex.md). Переход со старой версии: [docs/migration.md](docs/migration.md).
+Другие способы и необязательные инструменты: [INSTALL.md](INSTALL.md). Qwen Code: [docs/qwen.md](docs/qwen.md). Codex CLI, ещё не проверенный на настоящем Codex: [docs/codex.md](docs/codex.md). Переход со старой версии: [docs/migration.md](docs/migration.md).
 
 ## Использование
 
@@ -65,7 +72,7 @@ Claude Code:
 | `/memory status\|auto on\|auto off\|refresh\|rotate` | Управление памятью; `rotate` выносит закрытую работу в архив |
 | `/memstat` | Процессы поиска и прогресс индекса |
 
-В Claude Code навыки плагина называются `/memory-3layer:recall` и так далее. Клиент:
+В Claude Code и Qwen Code навыки плагина называются `/memory-3layer:recall` и так далее. Клиент:
 
 ```bash
 memory-3layer sync init <git-адрес>     # задать хранилище по умолчанию

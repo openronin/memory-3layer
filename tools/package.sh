@@ -4,7 +4,7 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-usage() { echo "usage: tools/package.sh <claude-code|codex> <output directory> [--dev]" >&2; exit 2; }
+usage() { echo "usage: tools/package.sh <claude-code|codex|qwen-code> <output directory> [--dev]" >&2; exit 2; }
 
 name="${1:-}"; out="${2:-}"
 [ -n "$name" ] && [ -n "$out" ] || usage
@@ -25,18 +25,31 @@ codex plugin add memory-3layer@memory-3layer
 
 Then trust the hooks in `/hooks`, and allow writes to the memory directory: see
 [docs/codex.md](https://github.com/openronin/memory-3layer/blob/main/docs/codex.md). This package has not yet been run on a real Codex.' ;;
+  qwen-code) title="Qwen Code plugin"; manifest=".qwen-plugin/plugin.json"
+    install='```bash
+qwen plugins marketplace add openronin/memory-3layer-qwen-code
+qwen plugins install memory-3layer@memory-3layer
+```' ;;
   *) usage ;;
 esac
 
-# How a skill reaches the client: only Claude Code puts a plugin's bin/ on PATH.
+# How a skill reaches the client: Claude Code and Qwen Code put a plugin's bin/ on PATH.
 case "$name" in
-  claude-code)
+  claude-code|qwen-code)
     client='bash "$(command -v memory-3layer | xargs dirname)"/'
     naming='Slash commands named below are skills of this plugin: `/recall` is `/memory-3layer:recall`, and so on.' ;;
   codex)
     client='bash <directory of the Client path in the session context>/'
     naming='Slash commands named below are skills of this plugin: `/recall` is `$recall`, and so on. A `memory-3layer` command means the Client path in the session context.' ;;
 esac
+
+# Qwen Code auto-loads AGENTS.md where Claude Code loads CLAUDE.md. .claude-docs keeps its
+# name so a repo used by both harnesses shares one L1b.
+if [ "$name" = qwen-code ]; then
+  retarget() { sed -E 's#CLAUDE\.md#AGENTS.md#g; s#Claude Code#Qwen Code#g; s#~/\.claude/\.memory-config#the config file printed by `memory-3layer path config`#g'; }
+else
+  retarget() { cat; }
+fi
 
 rm -rf "$out"; mkdir -p "$out"
 # the harness files: manifests and hooks. The importer goes where the client looks for it.
@@ -47,6 +60,12 @@ fi
 # the shared part, dereferenced: a package must stand on its own
 for shared in bin templates LICENSE; do cp -RL "$ROOT/$shared" "$out/$shared"; done
 cp "$ROOT/memory/IDENTITY.md" "$out/templates/IDENTITY.template.md"
+if [ "$name" = qwen-code ]; then
+  mv "$out/templates/repo/CLAUDE.md" "$out/templates/repo/AGENTS.md"
+  for f in "$out"/templates/repo/*.md "$out"/templates/repo/.claude-docs/*.md; do
+    retarget < "$f" > "$f.new" && mv "$f.new" "$f"
+  done
+fi
 chmod +x "$out"/bin/*
 mkdir -p "$out/scripts"; cp "$ROOT"/hooks/*.sh "$out/scripts/"; chmod +x "$out"/scripts/*
 
@@ -54,7 +73,7 @@ mkdir -p "$out/scripts"; cp "$ROOT"/hooks/*.sh "$out/scripts/"; chmod +x "$out"/
 # An installed plugin has bin/ on PATH and calls its commands by name.
 for c in "$ROOT"/commands/*.md; do
   n=$(basename "$c" .md); mkdir -p "$out/skills/$n"
-  { printf -- '---\nname: %s\n' "$n"; sed '1d' "$c" | sed "s#bash ~/\.claude/bin/#$client#"; } > "$out/skills/$n/SKILL.md"
+  { printf -- '---\nname: %s\n' "$n"; sed '1d' "$c" | sed "s#bash ~/\.claude/bin/#$client#" | retarget; } > "$out/skills/$n/SKILL.md"
 done
 mkdir -p "$out/skills/protocol"
 {
@@ -67,7 +86,7 @@ description: The full memory-3layer protocol - which layer a fact belongs to, ho
 $naming Templates are in the \`templates/\` directory of this plugin.
 
 H
-  sed -E 's#~/\.claude/dist/memory-3layer/templates/#the plugin'"'"'s `templates/` directory, #g' "$ROOT/CLAUDE.md"
+  sed -E 's#~/\.claude/dist/memory-3layer/templates/#the plugin'"'"'s `templates/` directory, #g' "$ROOT/CLAUDE.md" | retarget
 } > "$out/skills/protocol/SKILL.md"
 
 # the package is installed by a plain git clone: with core.autocrlf=true the client would arrive
@@ -76,7 +95,7 @@ printf '* text=auto eol=lf\n' > "$out/.gitattributes"
 
 # --dev: a marketplace of its own, so a build from a branch can stand beside the published one.
 if [ "${3:-}" = --dev ]; then
-  for m in "$out/.claude-plugin/marketplace.json" "$out/.agents/plugins/marketplace.json"; do
+  for m in "$out/.claude-plugin/marketplace.json" "$out/.agents/plugins/marketplace.json" "$out/.qwen-plugin/marketplace.json"; do
     [ -f "$m" ] && sed -i '0,/"name": "memory-3layer"/s//"name": "memory-3layer-dev"/' "$m"
   done
 fi

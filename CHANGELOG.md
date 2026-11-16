@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Qwen Code plugin: `harness/qwen-code`, run on Qwen Code 1.0.0-preview.1. The protocol and the repo templates target `AGENTS.md`, the file Qwen Code auto-loads; `.claude-docs/` keeps its name, so a repo used by both harnesses shares one L1b. The guard also covers Qwen Code's own memory directories. See `docs/qwen.md`.
 - Task journals: a `checkpoint` record holds the state of a long task. `task show` prints the latest one whole and only the decisions and notes after it. The client asks for one once 40 KB is logged since the last (`TASK_CHECKPOINT_BYTES`). A checkpoint less than half the size of the previous one is flagged: it replaces the previous one in `task show`.
 - Sync drops an active journal whose every record is already archived: a copy from before the close that another machine brought back, which showed the task as active again.
 - `search` without qmd falls back to plain-text matching instead of failing: archives are reached only through search.

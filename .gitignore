@@ -9,6 +9,7 @@ Thumbs.db
 # (these are example user-data paths; the repo itself ships templates only)
 *.bak
 *.log
+.qwen/settings.local.json
 
 # Local Obsidian config users may create when opening repo as a vault
 .obsidian/

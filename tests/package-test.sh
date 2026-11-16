@@ -60,6 +60,34 @@ ok "patch: home through a symlink" "$(patch "Add File: $T/linked/.local/share/me
 ok "patch: clean memory write passes silently" "$(patch "Update File: $H/projects/a/SESSION.md" "state" | g)" "rc=0"
 ok "patch: secret outside memory isn't its business" "$(patch "Update File: $T/src/a.py" "$FAKE" | g)" "rc=0"
 ok "shell: secret into memory blocked" "$(python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":"echo "+sys.argv[1]+" >> "+sys.argv[2]}}))' "$FAKE" "$H/projects/a/SESSION.md" | g)" "rc=2"
+# qwen-code package
+W=$T/w; "$ROOT/tools/package.sh" qwen-code "$W" >/dev/null; ok "qwen: builds" $? 0
+for f in .qwen-plugin/plugin.json .qwen-plugin/marketplace.json hooks/hooks.json bin/memory-3layer scripts/session-start.sh skills/protocol/SKILL.md templates/repo/AGENTS.md; do
+  ok "qwen: has $f" "$(test -f "$W/$f"; echo $?)" 0
+done
+for f in "$W"/.qwen-plugin/plugin.json "$W"/.qwen-plugin/marketplace.json "$W"/hooks/hooks.json; do python3 -m json.tool "$f" >/dev/null; ok "qwen: valid json ${f##*/}" $? 0; done
+ok "qwen: no Claude variable in hooks" "$(grep -c CLAUDE_PLUGIN "$W/hooks/hooks.json")" 0
+ok "qwen: plugin root in hooks" "$(grep -c QWEN_PLUGIN_ROOT "$W/hooks/hooks.json")" 6
+ok "qwen: no Claude manifest" "$(test -e "$W/.claude-plugin"; echo $?)" 1
+ok "qwen: no Codex manifest" "$(test -e "$W/.codex-plugin" -o -e "$W/.agents"; echo $?)" 1
+ok "qwen: same version" "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$W/.qwen-plugin/plugin.json")" "$v"
+ok "qwen: protocol has no CLAUDE.md" "$(grep -c 'CLAUDE\.md' "$W/skills/protocol/SKILL.md")" 0
+ok "qwen: protocol targets AGENTS.md" "$(grep -c 'AGENTS\.md' "$W/skills/protocol/SKILL.md" | sed 's/[1-9][0-9]*/y/')" y
+ok "qwen: no CLAUDE.md template" "$(test -e "$W/templates/repo/CLAUDE.md"; echo $?)" 1
+ok "qwen: skills keep the PATH client" "$(grep -c 'command -v memory-3layer' "$W/skills/codemap/SKILL.md" | sed 's/[1-9][0-9]*/y/')" y
+ok "qwen: no harness home paths in skills" "$(grep -rl '~/\.claude' "$W/skills" | wc -l | tr -d ' ')" 0
+out=$(cd "$T/r" && echo '{"hook_event_name":"SessionStart"}' | HOME="$T/h" bash "$W/scripts/session-start.sh")
+ok "qwen: hook answers from the package" "$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["hookSpecificOutput"]["hookEventName"])')" SessionStart
+w() { python3 -c 'import json,sys; print(json.dumps({"tool_name":"Write","tool_input":{"file_path":sys.argv[1],"content":sys.argv[2]}}))' "$1" "$2" | HOME="$T/h" bash "$W/bin/memory-3layer" guard 2>"$T/err"; echo "rc=$?"; }
+ok "qwen: secret into memory blocked" "$(w "$H/projects/a/SESSION.md" "$FAKE")" "rc=2"
+case "$(cat "$T/err")" in *"$FAKE"*) r=leak ;; *BLOCKED*) r=clean ;; *) r=none ;; esac; ok "qwen: message hides the value" $r clean
+ok "qwen: qwen own memory guarded" "$(w "$T/h/.qwen/projects/x/memory/note.md" "$FAKE")" "rc=2"
+ok "qwen: secret outside memory isn't its business" "$(w "$T/src/a.py" "$FAKE")" "rc=0"
+case "$(w "$H/projects/a/SESSION.md" "state")" in *rc=0) r=y ;; *) r=n ;; esac; ok "qwen: clean memory write passes" $r y
+out=$(python3 -c 'import json,sys; print(json.dumps({"tool_name":"Write","tool_input":{"file_path":sys.argv[1],"content":"state"}}))' "$H/projects/a/SESSION.md" | HOME="$T/h" bash "$W/bin/memory-3layer" guard)
+case "$out" in *'"permissionDecision":"allow"'*) r=y ;; *) r=n ;; esac; ok "qwen: clean write approved" $r y
+WD=$T/wd; "$ROOT/tools/package.sh" qwen-code "$WD" --dev >/dev/null; ok "qwen: dev builds" $? 0
+ok "qwen: dev marketplace of its own" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["name"])' "$WD/.qwen-plugin/marketplace.json")" memory-3layer-dev
 # publishing
 B=$T/pkg.git; git init -q --bare -b main "$B"
 export MEMORY_3LAYER_PACKAGE_REPO="$B" GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
