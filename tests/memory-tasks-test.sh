@@ -187,7 +187,8 @@ A=$(ls "$J"/archive/*/ship.md); ok "journal archived whole" "$(grep -c 'just a n
 ok "files moved with the journal" "$(cat "${A%.md}.files/rollback.sh")" "echo rollback"
 ok "no files dir left behind" "$(test -e "$J/ship.files"; echo $?)" 1
 ok "files of a closed task found" "$(m task files ship)" "${A%.md}.files"
-has "state lists it as closed" "$(m state)" "Recently closed: ship"
+# Tasks closed in the same second sort by their random record id, so the order isn't fixed.
+has "state lists it as closed" "$(m state | grep 'Recently closed:')" "ship"
 hasnt "and not as active" "$(m state)" "ship [active]"
 out=$(m task show ship); has "closed task can be read" "$out" "Result: Shipped v1"; has "closed status" "$out" "[done]"
 echo again | m task open ship >/dev/null; echo done2 | m task close ship >/dev/null
