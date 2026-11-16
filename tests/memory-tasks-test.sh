@@ -111,6 +111,13 @@ ok "parallel writes all land" "$(grep -c ' note s:' "$J/par.md")" 20
 ok "parallel writes stay whole" "$(grep -cE '^n[0-9]+$' "$J/par.md")" 20
 
 # --- binding and context ---
+tick() { printf '{"hook_event_name":"%s","session_id":"%s"}' "$1" "$2" | m sync tick 3600; }
+tick Stop sess-none; tick Stop sess-none
+has "third request without a task: told" "$(tick PostToolUse sess-none)" "NO TASK YET"
+ok "told once" "$(tick PostToolUse sess-none)" ""
+tick Stop sess-one; tick Stop sess-one; ok "a session with a task is not told" "$(tick PostToolUse sess-one)" ""
+has "pre-compact: an unbound session is told" "$(echo '{"session_id":"sess-none"}' | bash "$REPO/hooks/pre-compact.sh")" "WRITTEN TO NO TASK"
+hasnt "pre-compact: a bound one is not" "$(echo '{"session_id":"sess-one"}' | bash "$REPO/hooks/pre-compact.sh")" "WRITTEN TO NO TASK"
 has "a long next gets a hint" "$(head -c 400 /dev/zero | tr '\0' x | m task log par next)" "only the step ahead"
 has "another directory: the bound task is found" "$(cd "$T" && echo "from outside" | m task log par note 2>&1; grep -c 'from outside' "$J/par.md")" "1"
 CLAUDE_CODE_SESSION_ID=sess-two m task resume ship >/dev/null

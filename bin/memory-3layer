@@ -216,15 +216,41 @@ take_arrived() {
   rm -f "$tmp"
 }
 
+task_nudge() {
+  # task_nudge <session> — said once, to a session that is on its TASK_NUDGE_TURNS-th
+  # request and has written to no task. Sessions were seen to make server changes over
+  # five requests and a compaction and leave nothing in memory. The count is of finished
+  # turns, kept by the Stop hook; a session bound to a task has a binding file.
+  local turns="${TASK_NUDGE_TURNS:-3}" f="$STATE_DIR/turns/$1" n pd active
+  [[ "$turns" -gt 0 && -n "$1" && -f "$f" && ! -f "$STATE_DIR/bindings/$1" ]] || return 1
+  n=$(cat "$f"); [[ "$n" =~ ^[0-9]+$ && "$n" -ge $((turns - 1)) ]] || return 1
+  pd=$(project_dir 2>/dev/null) || return 1
+  [[ -f "$pd/CORE.md" || -d "$pd/_tasks" ]] || return 1
+  echo told > "$f"
+  active=$(ls "$pd/_tasks" 2>/dev/null | sed -n 's/\.md$//p' | paste -sd, - | sed 's/,/, /g')
+  printf 'NO TASK YET: this session is on request %d and has written to no task. Work finished and committed within the session needs none. Work with steps still ahead, or that changes anything outside the repository (a server, an external service, an account), is a task: record it now with memory-3layer task open <name>%s.' \
+    $((n + 1)) "${active:+, or task log if it belongs to an open one ($active)}"
+}
+
 cmd_tick_notes() {
-  # After a tick on PostToolUse: tell the agent about tasks that came in with a sync.
-  local input="" list
+  # After a tick: on Stop count the turn; on PostToolUse tell the agent about tasks that
+  # came in with a sync, and once about a session that works without a task.
+  local input="" list event="" sid="" out="" f
   [[ -t 0 ]] || IFS= read -r -d '' -t 1 input || true
-  [[ "$input" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"PostToolUse\" ]] || return 0
+  [[ "$input" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"([A-Za-z]+)\" ]] && event=${BASH_REMATCH[1]}
+  [[ "$input" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]+)\" ]] && sid=${BASH_REMATCH[1]}
+  if [[ "$event" == Stop && -n "$sid" && ! -f "$STATE_DIR/bindings/$sid" ]]; then
+    f="$STATE_DIR/turns/$sid"; mkdir -p "$STATE_DIR/turns"
+    [[ "$(cat "$f" 2>/dev/null)" == told ]] || echo $(( $(cat "$f" 2>/dev/null || echo 0) + 1 )) > "$f"
+    find "$STATE_DIR/turns" -type f -mtime +30 -delete 2>/dev/null
+    return 0
+  fi
+  [[ "$event" == PostToolUse ]] || return 0
   list=$(take_arrived | paste -sd, - | sed 's/,/, /g')
-  [[ -n "$list" ]] || return 0
-  printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"%s"}}\n' \
-    "$(json_escape "TASKS CHANGED ON ANOTHER MACHINE, brought by sync just now: $list. The task index from the session start doesn't have this. Before continuing one of them, or if it bears on the current work, read it with memory-3layer task show <name>.")"
+  [[ -z "$list" ]] || out="TASKS CHANGED ON ANOTHER MACHINE, brought by sync just now: $list. The task index from the session start doesn't have this. Before continuing one of them, or if it bears on the current work, read it with memory-3layer task show <name>."
+  list=$(task_nudge "$sid") && out="${out:+$out }$list"
+  [[ -n "$out" ]] || return 0
+  printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"%s"}}\n' "$(json_escape "$out")"
 }
 
 bound_elsewhere() {
@@ -272,7 +298,7 @@ TEXT
 
 Client: $SELF_DIR/memory-3layer. Rules: the protocol skill, or the repo entry (CLAUDE.md / AGENTS.md).
 
-Work with more than one step, or that can outlive this session, is a task:
+Work with more than one step, or that can outlive this session, is a task. Work finished and committed within the session needs none; a change outside the repository (a server, an external service, an account) always is one:
   memory-3layer task open <name> | task show <name> [--log|--brief] | task list
   memory-3layer task log <name> note|decision|next|blocker|checkpoint | task files <name> | task close <name>
 The text goes on stdin as a quoted heredoc. In echo "..." the shell runs \`...\` and expands \$, and the record is saved changed:

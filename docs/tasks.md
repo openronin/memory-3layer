@@ -101,6 +101,8 @@ Injected, so it can't be skipped:
     <# Brief from CORE.md>
     Commands: memory-3layer task show <slug>, state. Rules: the protocol skill.
 
+Not every session needs a task: work finished and committed within one is held by git. What is lost is work with steps still ahead and changes outside the repository, and commits don't show either: of five sessions without a record, the one that lost the most made no commit at all. So the signal is the session's length. A session that reaches its third request (`TASK_NUDGE_TURNS`, `0` for never) without writing to a task is told so once, after a tool call, with the open tasks named; the Stop hook counts the turns. The pre-compaction reminder says the same to a session that is still unbound. Neither blocks anything.
+
 After a compaction, the state of the task bound to this session is added. An unbound session picks a task with `task resume`, or opens one.
 
 `# Brief` runs from that heading to the next first-level heading. It is limited to `CORE_BRIEF_BYTES`, 5000 by default. Past that it is cut, and the agent is told so and asked to shorten it. If there is no brief, the agent is asked to read the file.
