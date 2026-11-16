@@ -46,7 +46,7 @@ Types: `open`, `note`, `decision`, `next`, `blocker`, `checkpoint`, `close`. Tas
 
 ## Commands
 
-The body always comes through stdin, so an agent can't trip over quoting.
+The body always comes through stdin, so an agent can't trip over quoting. That holds for a quoted heredoc (`<<'EOF'`), which the session context shows. In `echo "..." |` the shell still runs backticks and expands `$`, and the record is saved changed without an error: over half of the records in the first weeks were written that way.
 
     memory-3layer task open <slug>              # stdin: the goal
     memory-3layer task log <slug> <type>        # stdin: the record
@@ -65,7 +65,9 @@ The session id comes from `CLAUDE_CODE_SESSION_ID`, with `--session` for harness
 
 The guard blocks direct writes to `_tasks/`, including shell redirects. A mistake is corrected with a new record. The one exception is a `task redact` command for a secret that got through.
 
-The index shows the start of the last `next`. When that record first tells what was done and the step comes after a `next:` or `Дальше:` marker, the index shows the step. The session context says what each record type is for, because a long session loses the convention after a compaction: `note` is what was done and learned, `decision` a choice and why, `next` the step ahead.
+A command that names a task takes it from the project of the current directory. When the task isn't there and the session is bound to a task of that name in another project, that one is used, and the command says so: an agent that stepped into a scratch directory still means the task it works on.
+
+The index shows the start of the last `next`. A `next` longer than `TASK_NEXT_CHARS` (300, `0` for never) is saved, and the answer asks for a note and a short next: in the first weeks a third to a half of them were reports on what was done. When that record first tells what was done and the step comes after a `next:` or `Дальше:` marker, the index shows the step. The session context says what each record type is for, because a long session loses the convention after a compaction: `note` is what was done and learned, `decision` a choice and why, `next` the step ahead.
 
 Files a task needs beyond the session, such as scripts for a later rollback, go into the directory `task files <slug>` prints: `_tasks/<slug>.files/`. The guard lets those be written directly, and `task close` moves the directory to the archive with the journal.
 
@@ -75,7 +77,7 @@ Distillation is tied to `close`, and a long task doesn't close. Its journal grow
 
 So a task gets a `checkpoint` record: the state of the whole task, written by the agent for one that sees nothing else. `task show` prints the latest checkpoint whole and lists only the decisions and notes after it. A checkpoint is limited to `TASK_CHECKPOINT_MAX_BYTES`, 10000 by default, and a larger one is refused, because it is shown every time.
 
-Only the latest checkpoint is shown, so a later one written as a report on the last stretch hides the whole state an earlier one held. This happened on the same task within a day: a 6 KB state with the deploy commands and the production rules, then two 1.4 KB run reports. A checkpoint under half the size of the previous one is therefore flagged when written, saying what it replaces. It is not refused.
+Only the latest checkpoint is shown, so a later one written as a report on the last stretch hides the whole state an earlier one held. This happened on the same task within a day: a 6 KB state with the deploy commands and the production rules, then two 1.4 KB run reports. So a checkpoint under half the size of the one that holds the state does not replace it: `task show` prints the state checkpoint first and the latest smaller one after it, and the write says so. A checkpoint of at least half the size replaces both. Nothing is refused.
 
 When the records after the last checkpoint pass `TASK_CHECKPOINT_BYTES`, 40000 by default and `0` for never, the index marks the task `checkpoint due`, and `task log` and `task show` ask for one on every call. Nothing is refused: a refused record is a lost record. The pre-compaction reminder asks too, since that is the last moment the agent still has the whole context.
 

@@ -111,6 +111,8 @@ ok "parallel writes all land" "$(grep -c ' note s:' "$J/par.md")" 20
 ok "parallel writes stay whole" "$(grep -cE '^n[0-9]+$' "$J/par.md")" 20
 
 # --- binding and context ---
+has "a long next gets a hint" "$(head -c 400 /dev/zero | tr '\0' x | m task log par next)" "only the step ahead"
+has "another directory: the bound task is found" "$(cd "$T" && echo "from outside" | m task log par note 2>&1; grep -c 'from outside' "$J/par.md")" "1"
 CLAUDE_CODE_SESSION_ID=sess-two m task resume ship >/dev/null
 out=$(cd "$R" && echo '{"hook_event_name":"SessionStart","source":"compact","session_id":"sess-two"}' | CLAUDE_CODE_SESSION_ID= m context)
 has "bound session gets its task" "$out" "This session works on"
@@ -169,7 +171,11 @@ out=$(m task show long)
 has "show gives the checkpoint whole" "$out" "state line two"
 hasnt "show drops notes before the checkpoint" "$out" "old finding"
 has "show keeps notes after it" "$out" "new finding"
-has "a much smaller checkpoint is flagged" "$(echo "short" | m task log long checkpoint)" "replaces the previous one"
+has "a much smaller checkpoint is flagged" "$(echo "short" | m task log long checkpoint)" "gives both"
+out=$(m task show long)
+has "the state checkpoint stays in show after a much smaller one" "$out" "state line two"
+has "the smaller one follows it" "$out" "much smaller, so the one above is kept"
+ok "a whole state replaces both" "$(printf 'new state one\nnew state two\n' | m task log long checkpoint; m task show long | grep -c 'state line two\|much smaller')" "0"
 echo done | m task close long >/dev/null
 
 # --- files ---

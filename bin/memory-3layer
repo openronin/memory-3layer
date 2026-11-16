@@ -227,7 +227,28 @@ cmd_tick_notes() {
     "$(json_escape "TASKS CHANGED ON ANOTHER MACHINE, brought by sync just now: $list. The task index from the session start doesn't have this. Before continuing one of them, or if it bears on the current work, read it with memory-3layer task show <name>.")"
 }
 
+bound_elsewhere() {
+  # bound_elsewhere <task> — the project this session is bound to, when the task is
+  # active there and not in the project of the current directory. An agent that has
+  # stepped into a scratch directory still means the task it works on.
+  local s="${CLAUDE_CODE_SESSION_ID:-}" k t
+  [[ -n "$1" && "$s" =~ ^[A-Za-z0-9_-]+$ && -f "$STATE_DIR/bindings/$s" ]] || return 1
+  IFS=$'\t' read -r k t < "$STATE_DIR/bindings/$s"
+  [[ "$t" == "$1" && -f "$HOME_DIR/projects/$k/_tasks/$1.md" ]] || return 1
+  [[ ! -f "$(project_dir)/_tasks/$1.md" ]] || return 1
+  printf '%s' "$k"
+}
+
 tasks() {
+  local k
+  if [[ -z "${MEMORY_3LAYER_KEY:-}" && "${1:-}" == task ]]; then
+    case "${2:-}" in log|show|files|close)
+      if k=$(bound_elsewhere "${3:-}"); then
+        printf '(%s: taken from %s, the project this session works on, not from this directory)\n' "$3" "$k" >&2
+        local -x MEMORY_3LAYER_KEY="$k"
+      fi ;;
+    esac
+  fi
   MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" \
     MEMORY_3LAYER_PROJECT="$(project_dir)" MEMORY_3LAYER_KEY="$(project_key)" \
     TASK_STALE_DAYS="${TASK_STALE_DAYS:-7}" CORE_BRIEF_BYTES="${CORE_BRIEF_BYTES:-5000}" \
@@ -251,9 +272,13 @@ TEXT
 
 Client: $SELF_DIR/memory-3layer. Rules: the protocol skill, or the repo entry (CLAUDE.md / AGENTS.md).
 
-Work with more than one step, or that can outlive this session, is a task. Pass the text on stdin:
-  memory-3layer task open <name> | task resume <name> | task show <name> [--log|--brief] | task list
+Work with more than one step, or that can outlive this session, is a task:
+  memory-3layer task open <name> | task show <name> [--log|--brief] | task list
   memory-3layer task log <name> note|decision|next|blocker|checkpoint | task files <name> | task close <name>
+The text goes on stdin as a quoted heredoc. In echo "..." the shell runs \`...\` and expands \$, and the record is saved changed:
+  memory-3layer task log <name> note <<'EOF'
+  <text>
+  EOF
 Journals are written only through these commands. Keep next current as you work: note is what was done and learned, decision is a choice and why, next is only the step ahead (the index shows its start). When told a checkpoint is due, write it: the state of the whole task, which then stands for the older records in task show. Files a task needs beyond this session go in the directory task files prints. A task whose work is done is closed, after what must outlive it has moved into CORE.md.
 $pd/CORE.md is yours to edit freely: live extracts worth keeping, with the most important in its # Brief block. Before closing a task, move what must outlive it there. Never write a secret value into memory; write secret://<name>.
 TEXT

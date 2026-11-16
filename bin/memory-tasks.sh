@@ -23,6 +23,8 @@ SHOW_DECISIONS="${TASK_SHOW_DECISIONS:-5}"
 # A checkpoint is due when this much was logged after the last one; 0 turns it off.
 CHECKPOINT_DUE="${TASK_CHECKPOINT_BYTES:-40000}"
 CHECKPOINT_MAX="${TASK_CHECKPOINT_MAX_BYTES:-10000}"
+# A longer next is taken for a report on what was done; 0 turns the hint off.
+NEXT_CHARS="${TASK_NEXT_CHARS:-300}"
 BRIEF_BYTES="${CORE_BRIEF_BYTES:-5000}"
 CORE_SOFT="${CORE_SOFT_BYTES:-20000}"
 CORE_HARD="${CORE_HARD_BYTES:-40000}"
@@ -121,10 +123,15 @@ since_checkpoint() {
   if [[ "$ln" -eq 0 ]]; then echo 0; else tail -n +"$ln" "$1" | wc -c | tr -d ' '; fi
 }
 
-last_checkpoint_bytes() {
-  # Body size of the latest checkpoint in bytes, 0 without one. In a UTF-8 locale awk
+state_checkpoint_bytes() {
+  # Body size in bytes of the checkpoint that holds the state, 0 without one: the latest
+  # one that is not under half of the state checkpoint before it. In a UTF-8 locale awk
   # counts characters, half the bytes of Cyrillic text.
-  LC_ALL=C awk -v h="$HEADER" '$0 ~ h { in_cp = ($3 == "checkpoint"); if (in_cp) n = 0; next } in_cp { n += length($0) + 1 } END { print n + 0 }' "$1"
+  LC_ALL=C awk -v h="$HEADER" '
+    function settle() { if (in_cp && n * 2 >= st) st = n }
+    $0 ~ h { settle(); in_cp = ($3 == "checkpoint"); n = 0; next }
+    in_cp { n += length($0) + 1 }
+    END { settle(); print st + 0 }' "$1"
 }
 
 checkpoint_due() {
@@ -197,10 +204,17 @@ show() {
   [[ "$status" == done || -z "$nt" ]] || days=$(age_days "$nt")
   printf 'Task %s [%s]\n' "$slug" "$status"
   awk -v h="$HEADER" -v keep="$SHOW_NOTES" -v cap="$SHOW_NOTE_CHARS" -v keepd="$SHOW_DECISIONS" -v days="$days" -v limit="$NEXT_STALE_DAYS" '
+    # A checkpoint under half of the state one is a report on the latest work: the state
+    # one stays shown, with the latest such report after it.
+    function settle() {
+      if (cpd == "") return
+      if (length(cp) * 2 >= length(st)) { st = cp; std = cpd; late = ""; lated = ""; nlate = 0 }
+      else { late = cp; lated = cpd; nlate++ }
+    }
     $0 ~ h {
       t = $3; n++
       if (t == "next") nx = ""; else if (t == "blocker") bl = ""
-      if (t == "checkpoint") { cp = ""; cpd = substr($2, 1, 10); nd = 0; nn = 0 }
+      if (t == "checkpoint") { settle(); cp = ""; cpd = substr($2, 1, 10); nd = 0; nn = 0 }
       if (t == "decision") { nd++; dec[nd] = "- " substr($2, 1, 10) ": " }
       if (t == "note") { nn++; note[nn] = "- " substr($2, 1, 10) ": " }
       if (t == "blocker") kind = t; else if (t == "next") kind = t
@@ -219,9 +233,11 @@ show() {
     }
     END {
       sub(/\n+$/, "", goal); sub(/\n+$/, "", nx); sub(/\n+$/, "", bl); sub(/\n+$/, "", res)
-      sub(/\n+$/, "", cp); since = cpd == "" ? "" : " since the checkpoint"
+      settle(); sub(/\n+$/, "", st); sub(/\n+$/, "", late)
+      since = cpd == "" ? "" : " since the checkpoint"
       if (goal != "") print "Goal: " goal
-      if (cpd != "") print "Checkpoint " cpd ":\n" cp
+      if (std != "") print "Checkpoint " std ":\n" st
+      if (lated != "") print "Checkpoint " lated ", much smaller, so the one above is kept" (nlate > 1 ? " (" nlate - 1 " more like it are in --log)" : "") ":\n" late
       if (kind == "blocker" && bl != "") print "Blocker: " bl
       if (nx != "") print "Next: " nx
       if (days >= limit) print "(next is " days "d old: check it against what was done before continuing)"
@@ -280,15 +296,19 @@ cmd_log() {
   read_body "the record"
   # Shown whole in every `task show`, so it stays a summary.
   [[ "$2" != checkpoint || $(printf '%s' "$BODY" | wc -c) -le $CHECKPOINT_MAX ]] || die "a checkpoint is at most $((CHECKPOINT_MAX / 1000)) KB, and this one is $(( $(printf '%s' "$BODY" | wc -c) / 1000 )) KB: keep the state, leave the history to the notes"
-  local prev=0 size; [[ "$2" != checkpoint ]] || prev=$(last_checkpoint_bytes "$f")
+  local prev=0 size; [[ "$2" != checkpoint ]] || prev=$(state_checkpoint_bytes "$f")
   with_lock "$f" append "$f" "$2" "$BODY" || die "cannot write $f"
   bind "$1"
   checkpoint_note "$1" "$f"
   # A checkpoint replaces the previous one in `task show`. One written as a report on
   # the latest stretch hides the whole state the previous one held.
+  # The index shows the start of next. A long one usually opens with what was done,
+  # so the index shows that and not the step.
+  [[ "$2" != next || "$NEXT_CHARS" -eq 0 || ${#BODY} -le $NEXT_CHARS ]] ||
+    printf 'Saved. This next is %d characters, and the index shows only its start. What was done and learned goes in a note; next is only the step ahead, in a line or two. If it holds both, log the step again as a short next.\n' "${#BODY}"
   size=$(printf '%s' "$BODY" | wc -c)
   [[ "$2" != checkpoint ]] || (( size * 2 >= prev )) ||
-    printf 'This checkpoint (%d KB) now replaces the previous one (%d KB) in `task show`, and what only the previous one says is no longer shown. If it is not the state of the whole task, write one that is; a report on the latest work is a note.\n' $(( (size + 999) / 1000 )) $(( (prev + 999) / 1000 ))
+    printf 'This checkpoint (%d KB) is under half of the one that holds the state (%d KB), so `task show` gives both, the larger one first. A report on the latest work is a note. If this is the state of the whole task, write it whole: a checkpoint of at least half the size replaces the older one.\n' $(( (size + 999) / 1000 )) $(( (prev + 999) / 1000 ))
   return 0
 }
 
