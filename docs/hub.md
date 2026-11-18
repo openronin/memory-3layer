@@ -17,6 +17,18 @@ A memory hub is a git repository with the layout below. It replaces what `docs/s
 
 A user is usually in several hubs: a private one for `IDENTITY.md` and personal projects, and a team hub per team. Each project lives in one hub.
 
+## The local directory
+
+A hub is optional. Without one, memory is a plain directory on the machine, as it is today: no git, no login, no account.
+
+    <home>/identity/IDENTITY.md
+    <home>/projects/<key>/CORE.md
+    <home>/projects/<key>/_tasks/...
+
+This directory holds only the user's own memory and has no namespaces. The `@<login>/` level exists only in a hub: sync maps `projects/<key>/<file>` to `projects/<key>/@<login>/<file>` in the hub's clone, and back. The clone stays transport, kept apart from the data directory. Other members' memory is read from the clone and is never copied into the data directory.
+
+So connecting a hub, or leaving one, moves no local file.
+
 ## Names
 
 **Login.** Local to the hub: lowercase letters, digits, `-`, `_`, `.`, starting with a letter or digit. A service decides what a login is; on xchg.app it is the account's login.
@@ -162,7 +174,7 @@ How results are ranked is the service's business. Results from different provide
 
 Done by the client, per project, when the project first goes to a hub of this contract:
 
-1. `projects/<key>/*` moves to `projects/<key>/@<login>/`.
+1. In the hub, the project's files go under `projects/<key>/@<login>/`. Nothing moves in the local directory.
 2. `project.md` is merged into `CORE.md`, its entries marked `[user <date>]`.
 3. `memory-3layer core adopt` shows the repository's `CLAUDE.md` and `.claude-docs/`. The agent checks each fact against the code and moves what still holds into `CORE.md`, unmarked. It deletes nothing in the repository. Removing those files is a commit the user asks for, after a check of which harnesses read their protocol rules from the entry file.
 
