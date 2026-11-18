@@ -848,6 +848,25 @@ cmd_route() {
   fi
 }
 
+cmd_members() {
+  # members <key>: who else keeps memory of this project in its hub, for the task index.
+  # First a line "#shared <address>" when the hub has other members at all, then
+  # "<login><TAB><directory>" per member that has this project. Reads the clone as it is.
+  local key=${1:-} ADDR CLONE BRANCH d login
+  [[ -n "$key" ]] || return 0
+  load_conf
+  ADDR=$(route "$key" session); [[ "$ADDR" != none ]] || return 0
+  CLONE="$STORES/$(store_id "$ADDR")"; [[ -d "$CLONE/.git" ]] || return 0
+  BRANCH=$(git -C "$CLONE" symbolic-ref --short HEAD 2>/dev/null || echo main)
+  hub_mode 2>/dev/null && [[ -n "$HUB_LOGIN" ]] || return 0
+  [[ $(grep -cE '^\| [a-z0-9]' "$CLONE/contacts.md" 2>/dev/null) -gt 1 ]] && printf '#shared\t%s\n' "$ADDR"
+  for d in "$CLONE/projects/$key"/@*/; do
+    [[ -d "$d" ]] || continue
+    login=${d%/}; login=${login##*/@}
+    [[ "$login" == "$HUB_LOGIN" ]] || printf '%s\t%s\n' "$login" "${d%/}"
+  done
+}
+
 hint() {
   # hint <address> <problem>: what the user can do about it.
   local a=$1 key=${ACCESS[$1|ssh_key]:-} ssh=0
@@ -957,6 +976,7 @@ case "$sub" in
   status) cmd_status ;;
   route) shift; cmd_route "$@" ;;
   check) cmd_check ;;
+  members) shift; cmd_members "$@" ;;
   tick) shift; cmd_tick "$@" ;;
   *)
     while [[ $# -gt 0 ]]; do

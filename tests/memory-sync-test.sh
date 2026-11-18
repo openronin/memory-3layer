@@ -480,6 +480,11 @@ on m2 sync --quiet
 ok "hub: the member's other machine gets it" "$(rd m2 "$HK/CORE.md"):$(rd m2 identity/IDENTITY.md):$(rd m2 "$HK/_tasks/t1.md" | wc -l | tr -d ' ')" "alice knows:alice:1"
 rm "$(data m1)/$HK/_tasks/t1.md"; on m1 sync --quiet; on m2 sync --quiet
 ok "hub: a deletion travels inside the namespace" "$(exists m2 "$HK/_tasks/t1.md"):$(git -C "$HB" show "main:$HK/@bob/CORE.md")" "1:bob knows"
+# --- the index counts other members' open tasks ---
+HR="$T/hubrepo"; git init -q "$HR"; git -C "$HR" remote add origin git@github.com:o/hub.git
+mk m3 "$HK/_tasks/bobs.md" "$(printf '## 2026-01-02T00:00:00Z-bbbb open s:2\nbob goal')"; on m3 sync --quiet; on m1 sync --quiet
+case "$(cd "$HR" && on m1 state)" in *"Other members' open tasks: 1 (bob 1)"*) r=y ;; *) r=n ;; esac; ok "hub: the index counts another member's tasks" $r y
+case "$(cd "$HR" && on m1 state --all)" in *"bob:"*"bobs ["*"bob goal"*) r=y ;; *) r=n ;; esac; ok "hub: state --all lists them" $r y
 sed -i.bak '/^login/d' "$(conf m3)"; on m3 sync --quiet 2>/dev/null; ok "hub: no login, no sync" $? 1
 
 # --- a refused push is shown and not repeated until something changes ---

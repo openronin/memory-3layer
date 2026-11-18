@@ -201,6 +201,28 @@ index() {
       slug=${f##*/}; printf '%s\t%s\n' "$(grep -E "$HEADER" "$f" | tail -n1 | cut -d' ' -f2)" "${slug%.md}"
     done | sort -r | head -n "$RECENT" | cut -f2 | paste -sd, - | sed 's/,/, /g')
   [[ -z "$closed" ]] || printf 'Recently closed: %s\n' "$closed"
+  others
+}
+
+others() {
+  # others [all]: what other members of the hub have open in this project. They are read
+  # from the hub's clone and are not this session's tasks.
+  local all=${1:-} login dir f n total=0 who="" hub=""
+  [[ -n "${MEMORY_3LAYER_MEMBERS:-}" ]] || return 0
+  while IFS=$'\t' read -r login dir; do
+    [[ "$login" == "#shared" ]] && { hub=$dir; continue; }
+    [[ -n "$dir" ]] || continue
+    n=0; for f in "$dir"/_tasks/*.md; do [[ -f "$f" ]] && n=$((n + 1)); done
+    [[ $n -gt 0 ]] || continue
+    total=$((total + n)); who="${who:+$who, }$login $n"
+    if [[ -n "$all" ]]; then
+      printf '%s:\n' "$login"
+      for f in "$dir"/_tasks/*.md; do printf '  %s\n' "$(index_line "$f")"; done
+    fi
+  done <<< "$MEMORY_3LAYER_MEMBERS"
+  [[ -n "$all" ]] && return 0
+  [[ -z "$hub" ]] || printf "This project's memory is in a shared hub: its other members read everything written here.\n"
+  [[ $total -eq 0 ]] || printf "Other members' open tasks: %d (%s). To see them: memory-3layer state --all\n" "$total" "$who"
 }
 
 show() {
@@ -533,7 +555,7 @@ set -- ${args[@]+"${args[@]}"}
 
 cmd=${1:-}; [[ $# -gt 0 ]] && shift
 case "$cmd" in
-  state) index ;;
+  state) index; [[ "${1:-}" != --all ]] || others all ;;
   context) cmd_context ;;
   core) cmd_core "$@" ;;
   task)

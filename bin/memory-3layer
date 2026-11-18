@@ -286,6 +286,12 @@ tasks() {
       fi ;;
     esac
   fi
+  # The index also counts what other members of a shared hub have open in this project.
+  local members=""
+  case "${1:-}" in state|context)
+    members=$(MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" \
+      bash "$SELF_DIR/memory-sync.sh" members "$(project_key)" 2>/dev/null </dev/null) ;;
+  esac
   # A record carries the code revision it was written at, when this directory is the
   # project's repository and not a place the session stepped into.
   local rev="" h b
@@ -295,7 +301,7 @@ tasks() {
     b=$(git symbolic-ref -q --short HEAD 2>/dev/null) && [[ "$b" != *[[:space:]]* ]] && rev+=" b:$b"
   fi
   MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" \
-    MEMORY_3LAYER_PROJECT="$(project_dir)" MEMORY_3LAYER_KEY="$(project_key)" MEMORY_3LAYER_REV="$rev" \
+    MEMORY_3LAYER_PROJECT="$(project_dir)" MEMORY_3LAYER_KEY="$(project_key)" MEMORY_3LAYER_REV="$rev" MEMORY_3LAYER_MEMBERS="$members" \
     TASK_STALE_DAYS="${TASK_STALE_DAYS:-7}" CORE_BRIEF_BYTES="${CORE_BRIEF_BYTES:-5000}" \
     CORE_SOFT_BYTES="${CORE_SOFT_BYTES:-20000}" CORE_HARD_BYTES="${CORE_HARD_BYTES:-40000}" \
     bash "$SELF_DIR/memory-tasks.sh" "$@"
