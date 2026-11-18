@@ -230,6 +230,23 @@ hub_mode() {
   return 0
 }
 
+learn_routes() {
+  # Routing is not kept in a hub. A project this member has in a hub, and no rule for on
+  # this machine, lives in that hub: the rule is written to the local file. A project
+  # that already has a rule is left alone, and `sync status` shows it as kept elsewhere.
+  local d key learned=0
+  [[ -n "$HUB_LOGIN" && "$ADDR" != "$(first_rule '|default')" ]] || return 0
+  while IFS= read -r d; do
+    key=${d#projects/}; key=${key%%/@*}
+    [[ -n "$key" && -z "${RULE[$key|default]:-}${RULE[$key|session]:-}" ]] || continue
+    mkdir -p "$CONFIG_DIR"
+    printf '\n[project %s]\ndefault = %s\n' "$key" "$ADDR" >> "$LOCAL_CONF"
+    RULE[$key|default]=$ADDR; learned=1
+    say "$key: found in the hub $ADDR, kept there from now on (rule added to $LOCAL_CONF)"
+  done < <(git -C "$CLONE" ls-files "projects/*/@$HUB_LOGIN/*" | sed -E "s#/@$HUB_LOGIN/.*#/@#" | sort -u)
+  return 0
+}
+
 contact_row() {
   # A member is in the hub's contact book. Others in it mean the hub is shared.
   local c="$CLONE/contacts.md"
@@ -247,10 +264,17 @@ all_stores() {
   local id v default
   default=$(first_rule '|default')
   [[ "$default" != none ]] && printf '%s\n' "$default"
-  for id in "${!RULE[@]}"; do
-    v=${RULE[$id]}
-    [[ "$v" == none || "$v" == "$default" ]] || printf '%s\n' "$v"
-  done | sort -u
+  {
+    for id in "${!RULE[@]}"; do
+      v=${RULE[$id]}
+      [[ "$v" == none || "$v" == "$default" ]] || printf '%s\n' "$v"
+    done
+    # A connected hub is synced even before a rule sends anything there: its projects
+    # are how this machine learns what it holds.
+    for id in "${!ACCESS[@]}"; do
+      [[ "$id" == *"|login" && "${id%|login}" != "$default" ]] && printf '%s\n' "${id%|login}"
+    done
+  } | sort -u
 }
 
 # --- helpers ------------------------------------------------------------------
@@ -730,6 +754,7 @@ sync_store() {
   pre=$(git -C "$CLONE" rev-parse -q --verify HEAD 2>/dev/null || true)
   [[ -n "$base" ]] || pre=""
   merge_remote
+  learn_routes
   copy_in "$ADDR" "$pre"
   note_arrivals "$ADDR" "$pre"
 

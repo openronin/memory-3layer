@@ -1,6 +1,6 @@
 # Memory hub protocol
 
-Status: draft, `contract: 1`. Implemented in the client so far: `hub init`, `hub upgrade`, `hub add`, sync into a member's namespace, the revision in records, `CORE.log`, the watch on lines at the user's word, other members' tasks in the index. The rest is not.
+Status: draft, `contract: 1`. Implemented in the client so far: `hub init`, `hub upgrade`, `hub add`, sync into a member's namespace, the revision in records, `CORE.log`, the watch on lines at the user's word, other members' tasks in the index, routes learned from a connected hub. Not yet: search providers, `core adopt`, the merge of `project.md`.
 
 This is the contract between the memory-3layer client and a memory hub. The client side is this repository. A hosting service (xchg.app is the first) implements the hub side from this text alone, the way it reads a mail hub from the xchg contract.
 

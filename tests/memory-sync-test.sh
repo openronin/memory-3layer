@@ -485,6 +485,11 @@ HR="$T/hubrepo"; git init -q "$HR"; git -C "$HR" remote add origin git@github.co
 mk m3 "$HK/_tasks/bobs.md" "$(printf '## 2026-01-02T00:00:00Z-bbbb open s:2\nbob goal')"; on m3 sync --quiet; on m1 sync --quiet
 case "$(cd "$HR" && on m1 state)" in *"Other members' open tasks: 1 (bob 1)"*) r=y ;; *) r=n ;; esac; ok "hub: the index counts another member's tasks" $r y
 case "$(cd "$HR" && on m1 state --all)" in *"bob:"*"bobs ["*"bob goal"*) r=y ;; *) r=n ;; esac; ok "hub: state --all lists them" $r y
+# --- a machine with another default learns the hub's projects ---
+mkdir -p "$T/m4"; on m4 sync init "$(bare other)" >/dev/null; on m4 hub add team "$HB" --login alice >/dev/null
+on m4 sync --quiet
+ok "hub: a project found in a hub is kept there" "$(rd m4 "$HK/CORE.md"):$(grep -c "^\[project github.com/o/hub\]" "$(conf m4)")" "alice knows:1"
+on m4 sync --quiet; ok "hub: the rule is written once" "$(grep -c "^\[project github.com/o/hub\]" "$(conf m4)")" 1
 sed -i.bak '/^login/d' "$(conf m3)"; on m3 sync --quiet 2>/dev/null; ok "hub: no login, no sync" $? 1
 
 # --- a refused push is shown and not repeated until something changes ---
