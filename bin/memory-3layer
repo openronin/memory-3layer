@@ -275,8 +275,16 @@ tasks() {
       fi ;;
     esac
   fi
+  # A record carries the code revision it was written at, when this directory is the
+  # project's repository and not a place the session stepped into.
+  local rev="" h b
+  if [[ -z "${MEMORY_3LAYER_KEY:-}" ]] && h=$(git rev-parse --short HEAD 2>/dev/null); then
+    git diff-index --quiet HEAD -- 2>/dev/null || h+=+
+    rev="r:$h"
+    b=$(git symbolic-ref -q --short HEAD 2>/dev/null) && [[ "$b" != *[[:space:]]* ]] && rev+=" b:$b"
+  fi
   MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" \
-    MEMORY_3LAYER_PROJECT="$(project_dir)" MEMORY_3LAYER_KEY="$(project_key)" \
+    MEMORY_3LAYER_PROJECT="$(project_dir)" MEMORY_3LAYER_KEY="$(project_key)" MEMORY_3LAYER_REV="$rev" \
     TASK_STALE_DAYS="${TASK_STALE_DAYS:-7}" CORE_BRIEF_BYTES="${CORE_BRIEF_BYTES:-5000}" \
     CORE_SOFT_BYTES="${CORE_SOFT_BYTES:-20000}" CORE_HARD_BYTES="${CORE_HARD_BYTES:-40000}" \
     bash "$SELF_DIR/memory-tasks.sh" "$@"

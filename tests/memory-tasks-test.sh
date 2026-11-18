@@ -245,4 +245,10 @@ ok "guard: Edit of CORE.md is fine" "$(jj Edit file_path "$P/CORE.md" new_string
 ok "guard: secret into CORE.md" "$(jj Edit file_path "$P/CORE.md" new_string "$FAKE" | g)" 2
 ok "guard: a repo's own _tasks dir" "$(jj Write file_path "$R/_tasks/a.md" content x | g)" 0
 
+# --- a record carries the code revision ---
+git -C "$R" -c user.name=t -c user.email=t@t commit -q --allow-empty -m one; git -C "$R" checkout -q -b feat/x
+printf 'goal\n' | m task open rev >/dev/null; printf 'step with a revision\n' | m task log rev next >/dev/null
+ok "revision: in the header" "$(grep -c " next s:[^ ]* r:$(git -C "$R" rev-parse --short HEAD) b:feat/x\$" "$J/rev.md")" 1
+has "revision: such a record is read" "$(m task show rev --brief)" "step with a revision"
+
 echo; if [[ $fail -eq 0 ]]; then echo "all $n passed"; else echo "FAILED"; exit 1; fi

@@ -295,7 +295,7 @@ merge_journals() {
   # them in order of id. "Newer wins" would lose the other machine's work.
   awk 'function out() { if (rec != "") print id "\t" rec; rec = "" }
     FNR == 1 { out(); id = "" }
-    /^## [0-9-]+T[0-9:]+Z-[0-9a-f]+ [a-z]+ s:[^ ]+$/ { out(); id = $2; rec = $0; next }
+    /^## [0-9-]+T[0-9:]+Z-[0-9a-f]+ [a-z]+ s:[^ ]+( [a-z]+:[^ ]+)*$/ { out(); id = $2; rec = $0; next }
     id != "" { rec = rec "\001" $0 }
     END { out() }' "$1" "$2" \
     | LC_ALL=C sort -t "$(printf '\t')" -k1,1 -u | cut -f2- | tr '\001' '\n'
@@ -429,7 +429,7 @@ drop_stale_journals() {
   # active again. It goes; remove_deleted then takes it out of the storage. A journal
   # with records after the close is new work and stays.
   # Record ids are unique, so any archived journal of the project will do.
-  local addr=$1 p k ids re='s/^## ([0-9-]+T[0-9:]+Z-[0-9a-f]+) [a-z]+ s:[^ ]+$/\1/p'
+  local addr=$1 p k ids re='s/^## ([0-9-]+T[0-9:]+Z-[0-9a-f]+) [a-z]+ s:[^ ]+( [a-z]+:[^ ]+)*$/\1/p'
   local -a arch
   while IFS= read -r p; do
     [[ "$p" == projects/*/_tasks/*.md && "$p" != */_tasks/*/* ]] || continue

@@ -32,7 +32,9 @@ RECENT=5
 SESSION="${CLAUDE_CODE_SESSION_ID:-}"
 
 # No {n} intervals: mawk doesn't take them everywhere.
-HEADER='^## [0-9-]+T[0-9:]+Z-[0-9a-f]+ (open|note|decision|next|blocker|checkpoint|close) s:[^ ]+$'
+# After the session a header may carry more name:value fields (r: and b:, the code revision
+# and branch). A reader takes any of them, so a newer client can add one.
+HEADER='^## [0-9-]+T[0-9:]+Z-[0-9a-f]+ (open|note|decision|next|blocker|checkpoint|close) s:[^ ]+( [a-z]+:[^ ]+)*$'
 
 die() { printf 'memory-3layer: %s\n' "$*" >&2; exit 2; }
 
@@ -83,7 +85,7 @@ record_id() { printf '%s-%s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(od -An -N2 -tx1
 append() {
   # append <file> <type> <body>
   local s=${SESSION:0:8}
-  printf '## %s %s s:%s\n%s\n\n' "$(record_id)" "$2" "${s:--}" "$3" >> "$1"
+  printf '## %s %s s:%s%s\n%s\n\n' "$(record_id)" "$2" "${s:--}" "${MEMORY_3LAYER_REV:+ $MEMORY_3LAYER_REV}" "$3" >> "$1"
 }
 
 active_file() { printf '%s/%s.md' "$TASKS" "$1"; }
