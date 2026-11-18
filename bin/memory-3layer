@@ -668,7 +668,7 @@ memory-3layer — agent memory that belongs to no harness
   refresh [--debounce]                          rebuild the search index
   guard                                         PreToolUse hook: block secrets, allow the data dir
   secret <command>                              local secret store: put, list, run, scan...
-  task open|log|resume|show|files|list|close|redact   task journals: docs/tasks.md
+  task open|log|resume|show|files|list|close|redact   task journals; open, log and close take text on stdin: docs/tasks.md
   state                                         active and recently closed tasks (same as task list)
   core init | stash <title> | brief             CORE.md: put a project on it, archive a part, see the brief
 USAGE

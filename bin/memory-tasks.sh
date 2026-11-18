@@ -42,9 +42,12 @@ valid_slug() {
 
 read_body() {
   # The body comes through stdin, so an agent can't trip over shell quoting.
-  [[ ! -t 0 ]] || die "$1 comes from stdin"
+  # $2 is the command as typed, to show where the text goes. An agent's shell has no
+  # terminal, so a command run with no text arrives here as empty stdin.
+  local how="pass it on stdin: memory-3layer $2 <<'EOF' ... EOF"
+  [[ ! -t 0 ]] || die "$1 is missing, $how"
   BODY=$(cat)
-  [[ "$BODY" =~ [^[:space:]] ]] || die "$1 is empty"
+  [[ "$BODY" =~ [^[:space:]] ]] || die "$1 is missing, $how"
   scan "$BODY"
   # A line shaped like a header would split the record when it is read back.
   BODY=$(printf '%s\n' "$BODY" | sed -E "/$HEADER/s/^/\\\\/")
@@ -281,7 +284,7 @@ cmd_open() {
   valid_slug "$1"
   local f; f=$(active_file "$1")
   [[ ! -e "$f" ]] || die "task '$1' is already open"
-  read_body "the goal"
+  read_body "the goal" "task open $1"
   mkdir -p "$TASKS"
   with_lock "$f" append "$f" open "$BODY" || die "cannot write $f"
   bind "$1"
@@ -293,7 +296,7 @@ cmd_log() {
   case "$2" in note|decision|next|blocker|checkpoint) ;; *) die "bad record type '$2': note, decision, next, blocker or checkpoint" ;; esac
   valid_slug "$1"
   local f; f=$(need_active "$1") || exit 2
-  read_body "the record"
+  read_body "the record" "task log $1 $2"
   # Shown whole in every `task show`, so it stays a summary.
   [[ "$2" != checkpoint || $(printf '%s' "$BODY" | wc -c) -le $CHECKPOINT_MAX ]] || die "a checkpoint is at most $((CHECKPOINT_MAX / 1000)) KB, and this one is $(( $(printf '%s' "$BODY" | wc -c) / 1000 )) KB: keep the state, leave the history to the notes"
   local prev=0 size; [[ "$2" != checkpoint ]] || prev=$(state_checkpoint_bytes "$f")
@@ -355,7 +358,7 @@ cmd_close() {
   [[ $# -eq 1 ]] || die "usage: task close <name>, the result on stdin"
   valid_slug "$1"
   local f dest; f=$(need_active "$1") || exit 2
-  read_body "the result"
+  read_body "the result" "task close $1"
   dest="$ARCHIVE/$(date -u +%Y-%m)/$1.md"
   # A name can be used again: the older journal keeps its place.
   [[ -e "$dest" ]] && dest="${dest%.md}.$(date -u +%Y-%m-%dT%H-%M-%SZ).md"
@@ -473,7 +476,7 @@ core_stash() {
   [[ $# -ge 1 ]] || die "usage: core stash <title>, the text on stdin"
   local title="$*" file
   [[ "$title" != *$'\n'* ]] || die "the title is one line"
-  read_body "the text"
+  read_body "the text" "core stash <title>"
   scan "$title"
   file="CORE.archive.$(date -u +%Y-%m).md"
   mkdir -p "$PD"
@@ -510,7 +513,7 @@ case "$cmd" in
       list) index ;;
       close) cmd_close "$@" ;;
       redact) cmd_redact "$@" ;;
-      *) die "usage: task open|log|resume|show|files|list|close|redact (list is the same as state)" ;;
+      *) die "usage: task open|log|resume|show|files|list|close|redact (list is the same as state; open, log and close take their text on stdin)" ;;
     esac ;;
   *) die "usage: task ... | state | core ..." ;;
 esac
