@@ -1,6 +1,6 @@
 # Memory hub protocol
 
-Status: draft, `contract: 1`. Implemented in the client so far: `hub init`, `hub upgrade`, `hub add`, sync into a member's namespace, the revision in records, `CORE.log`, the watch on lines at the user's word, other members' tasks in the index, routes learned from a connected hub, search. Not yet: `core adopt`, the merge of `project.md`. The client does not look at `indexed` yet.
+Status: draft, `contract: 1`. Implemented in the client so far: `hub init`, `hub upgrade`, `hub add`, sync into a member's namespace, the revision in records, `CORE.log`, the watch on lines at the user's word, other members' tasks in the index, routes learned from a connected hub, search, `core adopt`, `hub contact rm`.
 
 This is the contract between the memory-3layer client and a memory hub. The client side is this repository. A hosting service (xchg.app is the first) implements the hub side from this text alone, the way it reads a mail hub from the xchg contract.
 
@@ -174,11 +174,9 @@ How results are ranked is the service's business. Results from different provide
 
 ## Migration
 
-Done by the client, per project, when the project first goes to a hub of this contract:
-
-1. In the hub, the project's files go under `projects/<key>/@<login>/`. Nothing moves in the local directory.
-2. `project.md` is merged into `CORE.md`, its entries marked `[user <date>]`.
-3. `memory-3layer core adopt` shows the repository's `CLAUDE.md` and `.claude-docs/`. The agent checks each fact against the code and moves what still holds into `CORE.md`, unmarked. It deletes nothing in the repository. Removing those files is a commit the user asks for, after a check of which harnesses read their protocol rules from the entry file.
+1. In the hub, the project's files go under `projects/<key>/@<login>/`. Sync does this by itself, and nothing moves in the local directory.
+2. `memory-3layer core adopt`, run in the project, moves `project.md` into `CORE.md` under `# Project notes`, with its list entries marked `[user <date of the file>]`. The old file is kept as `superseded/project.md`.
+3. The same command lists the repository's `CLAUDE.md`, `AGENTS.md` and `.claude-docs/`. The agent checks each fact against the code and moves what still holds into `CORE.md`, unmarked. It deletes nothing in the repository: removing those files is a commit the user asks for. A file that is the memory protocol itself is named as such and left alone.
 
 Moving a project into a team hub publishes its whole memory to the team, old journals included. The client says so and asks before the first push.
 
@@ -188,5 +186,5 @@ Moving a project into a team hub publishes its whole memory to the team, old jou
 - **Shared knowledge.** With a namespace per member, each agent learns the same pitfalls on its own, and search is the only bridge. A team-wide `CORE.md` would need a merge rule that one writer per namespace avoids.
 - **Access narrower than the hub.** Contract 1 has none: a second hub is the answer.
 - **Letter case in a key.** `github.com/Owner/Repo` and `github.com/owner/repo` are two keys. Two members whose remotes differ in case get two project directories, and only `aliases.tsv` joins them.
-- **Leaving a hub.** Who removes a member's row from `contacts.md` is up to the hub. Their namespace stays.
+- **Leaving a hub.** Who removes a member's row from `contacts.md` is up to the hub; the command is `memory-3layer hub contact rm <clone dir> <login>`. Their namespace stays.
 - **Names in the client.** `storage.conf` and the `sync` commands still say storage. Whether they are renamed to hub is undecided.

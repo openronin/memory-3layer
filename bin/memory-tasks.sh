@@ -26,8 +26,8 @@ CHECKPOINT_MAX="${TASK_CHECKPOINT_MAX_BYTES:-10000}"
 # A longer next is taken for a report on what was done; 0 turns the hint off.
 NEXT_CHARS="${TASK_NEXT_CHARS:-300}"
 BRIEF_BYTES="${CORE_BRIEF_BYTES:-5000}"
-CORE_SOFT="${CORE_SOFT_BYTES:-20000}"
-CORE_HARD="${CORE_HARD_BYTES:-40000}"
+CORE_SOFT="${CORE_SOFT_BYTES:-40000}"
+CORE_HARD="${CORE_HARD_BYTES:-80000}"
 RECENT=5
 # A line of CORE.md that ends this way was written at the user's word.
 USER_MARK='\[user [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\][[:space:]]*$'
@@ -440,7 +440,7 @@ core_notes() {
   [[ -f "$CORE" ]] || return 0
   local bytes; bytes=$(wc -c < "$CORE" | tr -d ' ')
   if [[ "$CORE_HARD" -gt 0 && "$bytes" -ge "$CORE_HARD" ]]; then
-    printf '\nCORE HARD LIMIT: CORE.md is %d KB. Before other work, shrink it: rewrite what is stale and move the rest out with `memory-3layer core stash`.\n' $((bytes / 1000))
+    printf '\nCORE HARD LIMIT: CORE.md is %d KB. Before other work, shrink it: rewrite what is stale and move the rest out with `memory-3layer core stash`. A line ending in [user <date>] stays unless the user agrees.\n' $((bytes / 1000))
   elif [[ "$CORE_SOFT" -gt 0 && "$bytes" -ge "$CORE_SOFT" ]]; then
     printf '\nCORE SOFT LIMIT: CORE.md is %d KB. At the next pause, shrink it: rewrite what is stale and move the rest out with `memory-3layer core stash`.\n' $((bytes / 1000))
   fi
@@ -469,8 +469,9 @@ cmd_core() {
     init) core_init "$@" ;;
     stash) core_stash "$@" ;;
     log) core_log ;;
+    adopt) core_adopt ;;
     brief) brief ;;
-    *) die "usage: core init | stash <title> | brief" ;;
+    *) die "usage: core init | stash <title> | adopt | brief" ;;
   esac
 }
 
@@ -509,6 +510,58 @@ core_stash() {
   mkdir -p "$PD"
   printf '# [%s] %s\n\n%s\n\n' "$(date -u +%Y-%m-%d)" "$title" "$BODY" >> "$PD/$file" || die "cannot write $file"
   printf 'Stashed. Remove the text from CORE.md and leave this line:\n- %s: see %s\n' "$title" "$file"
+}
+
+core_adopt() {
+  # Knowledge about a project lives in CORE.md, apart from the code. This brings in the
+  # two older places. project.md holds only what the user asked to keep, so it is moved
+  # whole and its entries are marked as written at the user's word. The repository's own
+  # docs need judgment, so the agent gets the list and the rules, and nothing is deleted.
+  local pm="$PD/project.md" day root f found=0
+  [[ -f "$CORE" ]] || die "this project has no CORE.md yet: memory-3layer core init"
+  if [[ -f "$pm" ]]; then
+    bash "$SELF_DIR/memory-secrets.sh" scan "$pm" >/dev/null 2>&1 || die "project.md holds a secret: move it out with memory-3layer secret adopt, then run this again"
+    day=$(date -u -r "$pm" +%Y-%m-%d 2>/dev/null || date -u +%Y-%m-%d)
+    {
+      printf '\n# Project notes\n<!-- Moved from project.md on %s. Each entry was written at the user'"'"'s word. -->\n' "$(date -u +%Y-%m-%d)"
+      awk -v mark=" [user $day]" '
+        NR == 1 && $0 == "---" { fm = 1; next }
+        fm { if ($0 == "---") fm = 0; next }
+        /^[[:space:]]*(```|~~~)/ { fence = !fence; print; next }
+        fence { print; next }
+        /^#/ { print "#" $0; next }
+        /^[[:space:]]*[-*+] / && $0 !~ /\[user [0-9-]+\][[:space:]]*$/ { sub(/[[:space:]]+$/, ""); print $0 mark; next }
+        { print }' "$pm"
+    } >> "$CORE" || die "cannot write $CORE"
+    mkdir -p "$PD/superseded" && mv "$pm" "$PD/superseded/project.md"
+    printf 'project.md is now part of %s, under "# Project notes". Its list entries end in [user %s]: they are not removed, changed or archived without the user'"'"'s permission. The old file is kept as superseded/project.md.\n\n' "$CORE" "$day"
+  fi
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=""
+  if [[ -n "$root" ]]; then
+    for f in "$root/CLAUDE.md" "$root/AGENTS.md" "$root"/.claude-docs/*.md; do
+      [[ -f "$f" ]] || continue
+      if [[ $found -eq 0 ]]; then
+        found=1
+        printf 'Knowledge kept in the repository, to be moved into %s:\n' "$CORE"
+      fi
+      if grep -q '^# Memory Protocol (memory-3layer)' "$f"; then
+        printf '  %s (%d KB): the memory protocol itself, not knowledge about this project. Leave it.\n' "$f" $(( $(wc -c < "$f") / 1000 ))
+      else
+        printf '  %s (%d KB)\n' "$f" $(( $(wc -c < "$f") / 1000 ))
+      fi
+    done
+  fi
+  if [[ $found -eq 1 ]]; then
+    cat <<'RULES'
+Read them. These files tend to lag behind the code, so check each fact against the code before
+keeping it. Move what still holds and can't be seen from the code itself into CORE.md, in your own
+words and without a [user ...] mark. Show the user what is doubtful instead of deciding alone.
+Delete nothing in the repository: when everything worth keeping is in CORE.md, tell the user, and
+remove the files only in a commit they ask for.
+RULES
+  elif [[ ! -f "$PD/superseded/project.md" ]]; then
+    echo "Nothing to adopt: no project.md, and the repository keeps no CLAUDE.md, AGENTS.md or .claude-docs."
+  fi
 }
 
 core_log() {

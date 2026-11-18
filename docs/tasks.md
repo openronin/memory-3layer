@@ -15,7 +15,7 @@ The split:
 | Rotated | mechanically, when the task closes | by the agent, when the size warning fires |
 | Loaded | index line at start; the rest on request | the `# Brief` block at start; the rest on request |
 
-`project.md` stays what changes only at the user's word. `CORE.md` is the agent's own judgment.
+`project.md` held what changes only at the user's word. That now lives in `CORE.md` as lines ending in `[user YYYY-MM-DD]`, which the agent does not remove, change or archive without permission; `memory-3layer core adopt` moves an existing `project.md` there. The rest of `CORE.md` is the agent's own judgment.
 
 ## Files
 
@@ -107,7 +107,7 @@ After a compaction, the state of the task bound to this session is added. An unb
 
 `# Brief` runs from that heading to the next first-level heading. It is limited to `CORE_BRIEF_BYTES`, 5000 by default. Past that it is cut, and the agent is told so and asked to shorten it. If there is no brief, the agent is asked to read the file.
 
-Size warnings on `CORE.md` fire at 20 KB and 40 KB, half of those on `SESSION.md`, because working state no longer lives there.
+Size warnings on `CORE.md` fire at 40 KB and 80 KB. Only `# Brief` is injected, so the size costs nothing by itself; the limits keep the file one an agent still rewrites. They were 20 KB and 40 KB until `CORE.md` took in what `project.md` held.
 
 ## Sync
 

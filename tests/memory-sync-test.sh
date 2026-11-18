@@ -490,6 +490,9 @@ mk m3 "$HK/CORE.md" "bob knows the zebra crossing"; on m3 sync --quiet; on m1 sy
 r=$(cd "$HR" && PATH="$(dirname "$(command -v bash)"):/usr/bin:/bin" on m1 search --here zebra 2>/dev/null)
 case "$r" in *"other members"*"@bob/CORE.md"*zebra*) x=y ;; *) x=n ;; esac; ok "hub: search finds another member's text" $x y
 case "$(cd "$HR" && on m1 search --here alice 2>/dev/null)" in *"@alice"*) x=y ;; *) x=n ;; esac; ok "hub: own namespace is not searched twice" $x n
+git -C "$T/hubclone" pull -q origin main 2>/dev/null; on m1 hub contact rm "$T/hubclone" bob >/dev/null
+ok "hub: contact rm takes the row out" "$(grep -c '^| bob |' "$T/hubclone/contacts.md"):$(grep -c '^| alice |' "$T/hubclone/contacts.md")" "0:1"
+git -C "$T/hubclone" reset -q --hard origin/main
 # --- a machine with another default learns the hub's projects ---
 mkdir -p "$T/m4"; on m4 sync init "$(bare other)" >/dev/null; on m4 hub add team "$HB" --login alice >/dev/null
 on m4 sync --quiet

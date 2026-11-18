@@ -263,4 +263,14 @@ sleep 1.1; grep -v 'Never restart' "$P/CORE.md" > "$P/c.tmp"; mv "$P/c.tmp" "$P/
 has "core log: a user line that is gone is reported" "$(tick)" "Never restart the queue by hand"
 ok "core log: reported once" "$(tick)" ""
 
+# --- core adopt: project.md becomes marked lines of CORE.md, repo docs are only listed ---
+printf -- '---\ntags: [x]\n---\n# Notes\n- Deploy only on Tuesdays.\n```\n- not a bullet\n```\n' > "$P/project.md"; touch -t 202603040000 "$P/project.md"
+printf '# Memory Protocol (memory-3layer)\n' > "$R/CLAUDE.md"; mkdir -p "$R/.claude-docs"; echo gotcha > "$R/.claude-docs/gotchas.md"
+out=$(m core adopt)
+ok "adopt: entries are marked with the file's date" "$(grep -c '^- Deploy only on Tuesdays. \[user 2026-03-0[34]\]$' "$P/CORE.md"):$(grep -c '^- not a bullet$' "$P/CORE.md"):$(grep -c '^## Notes$' "$P/CORE.md")" "1:1:1"
+ok "adopt: project.md is kept aside" "$(test -e "$P/project.md"; echo $?):$(test -f "$P/superseded/project.md"; echo $?)" "1:0"
+has "adopt: repo docs are listed" "$out" ".claude-docs/gotchas.md"
+has "adopt: the protocol file is told apart" "$out" "the memory protocol itself"
+ok "adopt: nothing in the repository is touched" "$(test -f "$R/CLAUDE.md" && test -f "$R/.claude-docs/gotchas.md"; echo $?)" 0
+
 echo; if [[ $fail -eq 0 ]]; then echo "all $n passed"; else echo "FAILED"; exit 1; fi

@@ -303,7 +303,7 @@ tasks() {
   MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" \
     MEMORY_3LAYER_PROJECT="$(project_dir)" MEMORY_3LAYER_KEY="$(project_key)" MEMORY_3LAYER_REV="$rev" MEMORY_3LAYER_MEMBERS="$members" \
     TASK_STALE_DAYS="${TASK_STALE_DAYS:-7}" CORE_BRIEF_BYTES="${CORE_BRIEF_BYTES:-5000}" \
-    CORE_SOFT_BYTES="${CORE_SOFT_BYTES:-20000}" CORE_HARD_BYTES="${CORE_HARD_BYTES:-40000}" \
+    CORE_SOFT_BYTES="${CORE_SOFT_BYTES:-40000}" CORE_HARD_BYTES="${CORE_HARD_BYTES:-80000}" \
     bash "$SELF_DIR/memory-tasks.sh" "$@"
 }
 
@@ -717,9 +717,11 @@ hub_query() {
 import json, sys
 me, clone = sys.argv[1], sys.argv[2]
 try:
-    rows = json.load(sys.stdin).get("results", [])
+    data = json.load(sys.stdin)
+    rows = data.get("results", [])
 except Exception:
     sys.exit(1)
+print("#indexed %s" % (data.get("indexed") or "-"))
 for r in rows:
     if r.get("login") == me:
         continue
@@ -731,7 +733,7 @@ for r in rows:
 search_hubs() {
   # What other members of the connected hubs wrote. With --here, only the hub that holds
   # this project, and only this project in it.
-  local here=$1 key="" addr clone login url secret out dir why; shift
+  local here=$1 key="" addr clone login url secret out dir why idx base; shift
   local -a words; read -ra words <<< "$*"
   [[ -f "$(dirname "$CONFIG_FILE")/storage.conf" ]] || return 0
   [[ -z "$here" ]] || key=$(project_key)
@@ -746,6 +748,13 @@ search_hubs() {
     [[ -z "${MEMORY_3LAYER_SEARCH_URL:-}" ]] || url=$MEMORY_3LAYER_SEARCH_URL
     if [[ "$url" != - && "$secret" != - && "$(url_host "$url")" == "$(url_host "$addr")" ]] \
        && out=$(hub_query "$url" "$secret" "$key" "$login" "$clone" "$*"); then
+      # The index is built after a push, in the background: say when it lags behind.
+      idx=${out%%$'\n'*}; idx=${idx#"#indexed "}; out=$(printf '%s\n' "$out" | sed 1d)
+      base=$(cat "$clone.base" 2>/dev/null)
+      if [[ -n "$base" && "$idx" != - ]] && git -C "$clone" cat-file -e "$idx^{commit}" 2>/dev/null \
+         && ! git -C "$clone" merge-base --is-ancestor "$base" "$idx" 2>/dev/null; then
+        echo "search: the hub has not indexed the latest push yet; its answer is from before it." >&2
+      fi
       [[ -n "$out" ]] || continue
       printf '\n== other members, hub %s\n%s\n' "$addr" "$out"
     else
@@ -802,10 +811,10 @@ memory-3layer — agent memory that belongs to no harness
   refresh [--debounce]                          rebuild the search index
   guard                                         PreToolUse hook: block secrets, allow the data dir
   secret <command>                              local secret store: put, list, run, scan...
-  hub init|upgrade <clone dir> | add <name> <remote> --login <login>   memory hubs: docs/hub.md
+  hub init|upgrade <clone dir> | add <name> <remote> --login <login> | contact rm <clone dir> <login>   memory hubs: docs/hub.md
   task open|log|resume|show|files|list|close|redact   task journals; open, log and close take text on stdin: docs/tasks.md
   state                                         active and recently closed tasks (same as task list)
-  core init | stash <title> | brief             CORE.md: put a project on it, archive a part, see the brief
+  core init | stash <title> | adopt | brief     CORE.md: put a project on it, archive a part, bring in project.md and repo docs
 USAGE
 }
 

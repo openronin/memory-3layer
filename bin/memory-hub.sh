@@ -126,10 +126,25 @@ cmd_add() {
   fi
 }
 
+cmd_contact() {
+  # contact rm <clone dir> <login>: take a member out of the contact book. Their
+  # namespace and the history stay. Commits, does not push.
+  [[ "${1:-}" == rm && $# -eq 3 ]] || die "usage: hub contact rm <clone dir> <login>"
+  local login=$3
+  clone_dir "$2"
+  [[ "$login" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "bad login '$login'"
+  grep -qF "| $login |" "$DIR/contacts.md" 2>/dev/null || die "no $login in contacts.md"
+  grep -vF "| $login |" "$DIR/contacts.md" > "$DIR/contacts.md.$$.tmp" && mv -f "$DIR/contacts.md.$$.tmp" "$DIR/contacts.md"
+  g add contacts.md
+  g commit -q -m "[memory-3layer] contacts: -$login" || die "cannot commit in $DIR"
+  printf 'Removed %s from contacts.md. Push it: git -C %s push origin main\n' "$login" "$DIR"
+}
+
 sub=${1:-}; [[ $# -gt 0 ]] && shift
 case "$sub" in
+  contact) cmd_contact "$@" ;;
   init) cmd_init "$@" ;;
   upgrade) cmd_upgrade "$@" ;;
   add) cmd_add "$@" ;;
-  *) echo "usage: hub init <clone dir> [--search <url>] | hub upgrade <clone dir> [--search <url>] | hub add <name> <remote> --login <login> [--token-from <url>]" >&2; exit 2 ;;
+  *) echo "usage: hub init <clone dir> [--search <url>] | hub upgrade <clone dir> [--search <url>] | hub add <name> <remote> --login <login> [--token-from <url>] | hub contact rm <clone dir> <login>" >&2; exit 2 ;;
 esac
