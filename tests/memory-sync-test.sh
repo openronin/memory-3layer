@@ -485,6 +485,11 @@ HR="$T/hubrepo"; git init -q "$HR"; git -C "$HR" remote add origin git@github.co
 mk m3 "$HK/_tasks/bobs.md" "$(printf '## 2026-01-02T00:00:00Z-bbbb open s:2\nbob goal')"; on m3 sync --quiet; on m1 sync --quiet
 case "$(cd "$HR" && on m1 state)" in *"Other members' open tasks: 1 (bob 1)"*) r=y ;; *) r=n ;; esac; ok "hub: the index counts another member's tasks" $r y
 case "$(cd "$HR" && on m1 state --all)" in *"bob:"*"bobs ["*"bob goal"*) r=y ;; *) r=n ;; esac; ok "hub: state --all lists them" $r y
+# --- search adds what other members wrote, and not the user's own a second time ---
+mk m3 "$HK/CORE.md" "bob knows the zebra crossing"; on m3 sync --quiet; on m1 sync --quiet
+r=$(cd "$HR" && PATH="$(dirname "$(command -v bash)"):/usr/bin:/bin" on m1 search --here zebra 2>/dev/null)
+case "$r" in *"other members"*"@bob/CORE.md"*zebra*) x=y ;; *) x=n ;; esac; ok "hub: search finds another member's text" $x y
+case "$(cd "$HR" && on m1 search --here alice 2>/dev/null)" in *"@alice"*) x=y ;; *) x=n ;; esac; ok "hub: own namespace is not searched twice" $x n
 # --- a machine with another default learns the hub's projects ---
 mkdir -p "$T/m4"; on m4 sync init "$(bare other)" >/dev/null; on m4 hub add team "$HB" --login alice >/dev/null
 on m4 sync --quiet

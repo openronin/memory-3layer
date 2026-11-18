@@ -613,42 +613,151 @@ cmd_projects() {
 }
 
 cmd_search() {
-  # search [--here] <query>: BM25 over memory. qmd has no path filter (it silently
-  # ignores --filter), so --here filters its ranked file list. qmd also rewrites
-  # paths, turning dots into dashes, and the key has to be compared in that form.
-  command -v qmd >/dev/null 2>&1 || { search_plain "$@"; return; }
+  # search [--here] <query>. Two parts, shown apart because their rankings don't compare:
+  # this user's own memory, through the chain of local providers, and what other members
+  # of a connected hub wrote, through the hub's search or, failing that, its clone.
+  # A provider that fails hands over to the next one; one that finds nothing does not.
+  local here="" p rc
+  [[ "${1:-}" == --here ]] && { here=--here; shift; }
+  [[ $# -gt 0 ]] || die "usage: search [--here] <query>"
+  for p in ${SEARCH_PROVIDERS:-qmd plain}; do
+    rc=0
+    case "$p" in
+      qmd) search_qmd $here "$@" || rc=$? ;;
+      plain) search_plain $here "$@" || rc=$? ;;
+      *) search_command "$p" "$here" "$@" || rc=$? ;;
+    esac
+    [[ $rc -eq 0 ]] && break
+  done
+  search_hubs "$here" "$@"
+}
+
+search_qmd() {
+  # BM25 through qmd. qmd has no path filter (it silently ignores --filter), so --here
+  # filters its ranked file list. qmd also rewrites paths, turning dots into dashes, and
+  # the key has to be compared in that form.
+  command -v qmd >/dev/null 2>&1 || return 1
   if [[ "${1:-}" == --here ]]; then
-    shift; [[ $# -gt 0 ]] || die "usage: search [--here] <query>"
-    local prefix
+    shift
+    local prefix out
     prefix="qmd://memory-3layer/projects/$(project_key | tr '.' '-' | tr '[:upper:]' '[:lower:]')/"
-    qmd search "$*" -c memory-3layer --files -n 200 | awk -F, -v p="$prefix" 'index($3, p) == 1' | head -n 10
+    out=$(qmd search "$*" -c memory-3layer --files -n 200) || return 1
+    printf '%s\n' "$out" | awk -F, -v p="$prefix" 'index($3, p) == 1' | head -n 10
   else
-    [[ $# -gt 0 ]] || die "usage: search [--here] <query>"
     qmd search "$*" -c memory-3layer -n 5
   fi
 }
 
-search_plain() {
-  # Without qmd: files that contain the most of the query's words, then the most matching
-  # lines. Archives are found only by search, so no qmd must not mean no search.
-  local here=0 dir="$HOME_DIR" n=5
-  [[ "${1:-}" == --here ]] && { here=1; shift; dir="$HOME_DIR/projects/$(project_key)"; n=10; }
-  [[ $# -gt 0 ]] || die "usage: search [--here] <query>"
-  [[ -d "$dir" ]] || return 0
-  echo "qmd is not installed: plain-text search, files with the most of the words first." >&2
-  local -a words args=(); read -ra words <<< "$*"
-  local w; for w in "${words[@]}"; do args+=(-e "$w"); done
-  local files
-  files=$(for w in "${words[@]}"; do grep -rilF --include='*.md' --exclude-dir=superseded -- "$w" "$dir" 2>/dev/null; done \
+search_command() {
+  # search_command <name> <--here or nothing> <query...>: a provider of the user's own,
+  # SEARCH_CMD_<name> in the config. It gets the query as arguments and the directory to
+  # search in MEMORY_3LAYER_SEARCH_DIR, and prints path:line<TAB>snippet per result.
+  local name=$1 here=$2 var cmd dir="$HOME_DIR"; shift 2
+  [[ "$name" =~ ^[A-Za-z0-9_]+$ ]] || { echo "search: bad provider name '$name'" >&2; return 1; }
+  var="SEARCH_CMD_$name"; cmd=${!var:-}
+  [[ -n "$cmd" ]] || { echo "search: provider '$name' has no $var in $CONFIG_FILE" >&2; return 1; }
+  [[ -z "$here" ]] || dir="$HOME_DIR/projects/$(project_key)"
+  MEMORY_3LAYER_SEARCH_DIR="$dir" bash -c "$cmd \"\$@\"" search "$@"
+}
+
+plain_files() {
+  # plain_files <n> <directory> <a directory name to skip> <words...>: files that hold
+  # the most of the words, then the most matching lines.
+  local n=$1 dir=$2 skip=$3 w; shift 3
+  local -a args=(); for w in "$@"; do args+=(-e "$w"); done
+  for w in "$@"; do grep -rilF --include='*.md' --exclude-dir=superseded --exclude-dir=.git --exclude-dir='*.files' --exclude-dir="$skip" -- "$w" "$dir" 2>/dev/null; done \
     | sort | uniq -c | sort -rn | awk '{ $1 = $1 } 1' | while read -r cnt f; do
         printf '%d\t%d\t%s\n' "$cnt" "$(grep -ciF "${args[@]}" -- "$f")" "$f"
-      done | sort -t$'\t' -k1,1nr -k2,2nr | head -n "$n" | cut -f3)
-  [[ -n "$files" ]] || { echo "nothing found" >&2; return 0; }
-  if (( here )); then printf '%s\n' "$files"; return 0; fi
-  local f; while IFS= read -r f; do
+      done | sort -t$'\t' -k1,1nr -k2,2nr | head -n "$n" | cut -f3
+}
+
+plain_lines() {
+  # plain_lines <words...>: for each file on stdin, its name and its first matching lines.
+  local w f; local -a args=(); for w in "$@"; do args+=(-e "$w"); done
+  while IFS= read -r f; do
     echo "== $f"
     grep -niF "${args[@]}" -- "$f" | head -n 3 | cut -c1-300
-  done <<< "$files"
+  done
+}
+
+search_plain() {
+  # Without qmd: plain text. Archives are found only by search, so no qmd must not mean
+  # no search.
+  local here=0 dir="$HOME_DIR" n=5
+  [[ "${1:-}" == --here ]] && { here=1; shift; dir="$HOME_DIR/projects/$(project_key)"; n=10; }
+  [[ -d "$dir" ]] || return 0
+  echo "qmd is not installed: plain-text search, files with the most of the words first." >&2
+  local -a words; read -ra words <<< "$*"
+  local files
+  files=$(plain_files "$n" "$dir" superseded "${words[@]}")
+  [[ -n "$files" ]] || { echo "nothing found" >&2; return 0; }
+  if (( here )); then printf '%s\n' "$files"; return 0; fi
+  plain_lines "${words[@]}" <<< "$files"
+}
+
+url_host() { printf '%s' "$1" | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/@]*@)?([^/]+).*#\2#p'; }
+
+hub_query() {
+  # hub_query <search address> <secret name> <key or nothing> <own login> <clone> <query>:
+  # ask the hub. Prints results of other members and succeeds, or fails for the fallback.
+  # The token goes only to the host the hub's repository is on, checked by the caller.
+  local url=$1 secret=$2 key=$3 me=$4 clone=$5 q=$6 body out code
+  command -v curl >/dev/null && command -v python3 >/dev/null || return 1
+  body="{\"query\":\"$(json_escape "$q")\",\"projects\":[${key:+\"$(json_escape "$key")\"}],\"limit\":20}"
+  out=$(MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" bash "$SELF_DIR/memory-secrets.sh" run "MEMORY_3LAYER_HUB_TOKEN=$secret" -- \
+    bash -c 'curl -sS --max-time 20 -w "\n%{http_code}" -X POST "$1" -H "Authorization: Bearer $MEMORY_3LAYER_HUB_TOKEN" -H "Content-Type: application/json" -d "$2"' _ "$url" "$body" 2>/dev/null) || return 1
+  code=${out##*$'\n'}; out=${out%$'\n'*}
+  case "$code" in
+    200) ;;
+    401) echo "search: the hub rejected the token of secret://$secret: it is wrong or expired. Tell the user to renew it." >&2; return 1 ;;
+    400|403) echo "search: the hub answered $code: $(printf '%s' "$out" | cut -c1-200). Tell the user." >&2; return 1 ;;
+    *) return 1 ;;
+  esac
+  printf '%s' "$out" | python3 -c '
+import json, sys
+me, clone = sys.argv[1], sys.argv[2]
+try:
+    rows = json.load(sys.stdin).get("results", [])
+except Exception:
+    sys.exit(1)
+for r in rows:
+    if r.get("login") == me:
+        continue
+    snip = " ".join(str(r.get("snippet", "")).split())[:300]
+    print("%s/%s:%s\t[%s] %s" % (clone, r.get("path", ""), r.get("line", 1), r.get("login", "?"), snip))
+' "$me" "$clone"
+}
+
+search_hubs() {
+  # What other members of the connected hubs wrote. With --here, only the hub that holds
+  # this project, and only this project in it.
+  local here=$1 key="" addr clone login url secret out dir why; shift
+  local -a words; read -ra words <<< "$*"
+  [[ -f "$(dirname "$CONFIG_FILE")/storage.conf" ]] || return 0
+  [[ -z "$here" ]] || key=$(project_key)
+  while IFS=$'\t' read -r addr clone login url secret; do
+    [[ -n "$clone" ]] || continue
+    dir="$clone/projects${key:+/$key}"
+    # Nobody else in scope: nothing to add to the user's own memory.
+    compgen -G "$dir/@*" >/dev/null || [[ -z "$key" ]] || continue
+    out=""; why="its search did not answer"
+    [[ "$url" != - ]] || why="it has no search of its own"
+    # For a hub whose README does not name its search yet.
+    [[ -z "${MEMORY_3LAYER_SEARCH_URL:-}" ]] || url=$MEMORY_3LAYER_SEARCH_URL
+    if [[ "$url" != - && "$secret" != - && "$(url_host "$url")" == "$(url_host "$addr")" ]] \
+       && out=$(hub_query "$url" "$secret" "$key" "$login" "$clone" "$*"); then
+      [[ -n "$out" ]] || continue
+      printf '\n== other members, hub %s\n%s\n' "$addr" "$out"
+    else
+      [[ -d "$dir" ]] || continue
+      out=$(plain_files 5 "$dir" "@$login" "${words[@]}")
+      [[ -n "$out" ]] || continue
+      printf '\n== other members, hub %s (%s: plain text over the local copy)\n' "$addr" "$why"
+      plain_lines "${words[@]}" <<< "$out"
+    fi
+  done < <(MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" \
+             bash "$SELF_DIR/memory-sync.sh" hubs ${key:+"$key"} 2>/dev/null </dev/null)
+  return 0
 }
 
 cmd_refresh() {
@@ -689,7 +798,7 @@ memory-3layer — agent memory that belongs to no harness
   rekey <old key> <new key>                     move memory after a remote changed
   projects                                      keys that have memory
   assign <old folder> <key>                     give an unattributed folder its project
-  search [--here] <query>                       full-text search over memory
+  search [--here] <query>                       search own memory, and other members' in a hub
   refresh [--debounce]                          rebuild the search index
   guard                                         PreToolUse hook: block secrets, allow the data dir
   secret <command>                              local secret store: put, list, run, scan...

@@ -892,6 +892,24 @@ cmd_members() {
   done
 }
 
+cmd_hubs() {
+  # hubs [key]: the memory hubs this machine is connected to, or the one that holds a
+  # project, for search. One line each: address, clone, this member's login, the search
+  # address from the hub's README, the name of the secret with the token; "-" for none.
+  local key=${1:-} ADDR CLONE BRANCH url
+  local -a list
+  load_conf
+  if [[ -n "$key" ]]; then list=("$(route "$key" session)"); else mapfile -t list < <(all_stores); fi
+  for ADDR in ${list[@]+"${list[@]}"}; do
+    [[ "$ADDR" != none ]] || continue
+    CLONE="$STORES/$(store_id "$ADDR")"; [[ -d "$CLONE/.git" ]] || continue
+    BRANCH=$(git -C "$CLONE" symbolic-ref --short HEAD 2>/dev/null || echo main)
+    hub_mode 2>/dev/null && [[ -n "$HUB_LOGIN" ]] || continue
+    url=$(readme_header search < "$CLONE/README.md" 2>/dev/null)
+    printf '%s\t%s\t%s\t%s\t%s\n' "$ADDR" "$CLONE" "$HUB_LOGIN" "${url:--}" "${ACCESS[$ADDR|password]:--}"
+  done
+}
+
 hint() {
   # hint <address> <problem>: what the user can do about it.
   local a=$1 key=${ACCESS[$1|ssh_key]:-} ssh=0
@@ -1002,6 +1020,7 @@ case "$sub" in
   route) shift; cmd_route "$@" ;;
   check) cmd_check ;;
   members) shift; cmd_members "$@" ;;
+  hubs) shift; cmd_hubs "$@" ;;
   tick) shift; cmd_tick "$@" ;;
   *)
     while [[ $# -gt 0 ]]; do

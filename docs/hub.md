@@ -1,6 +1,6 @@
 # Memory hub protocol
 
-Status: draft, `contract: 1`. Implemented in the client so far: `hub init`, `hub upgrade`, `hub add`, sync into a member's namespace, the revision in records, `CORE.log`, the watch on lines at the user's word, other members' tasks in the index, routes learned from a connected hub. Not yet: search providers, `core adopt`, the merge of `project.md`.
+Status: draft, `contract: 1`. Implemented in the client so far: `hub init`, `hub upgrade`, `hub add`, sync into a member's namespace, the revision in records, `CORE.log`, the watch on lines at the user's word, other members' tasks in the index, routes learned from a connected hub, search. Not yet: `core adopt`, the merge of `project.md`. The client does not look at `indexed` yet.
 
 This is the contract between the memory-3layer client and a memory hub. The client side is this repository. A hosting service (xchg.app is the first) implements the hub side from this text alone, the way it reads a mail hub from the xchg contract.
 
@@ -130,12 +130,12 @@ Handing a task to another member is not in contract 1.
 
 ## Search
 
-Search is a chain of providers, tried in order. The next one is used when a provider fails, never because it found nothing.
+`memory-3layer search` answers in two parts, shown apart because their rankings don't compare.
 
-- **Local providers** search the data directory and the clones on this machine. They are configured once, globally. Since a clone holds every member's namespace, local search covers a team hub as well.
-- **Remote providers** receive queries, and some receive content. They are off unless a rule allows one for a project. A hub's own search is allowed for the projects kept in that hub.
+- **The user's own memory** is searched on the machine, in the data directory, by a chain of local providers: `SEARCH_PROVIDERS` in the client's config, `qmd plain` by default. The next one is used when a provider fails, never because it found nothing. A provider of the user's own is a name in that chain and a command in `SEARCH_CMD_<name>`: the query in its arguments, the directory in `MEMORY_3LAYER_SEARCH_DIR`, one result per line on stdout, `path:line<TAB>snippet`.
+- **What other members wrote** comes from the hub's search. When the hub has none, or it fails, the client searches the other namespaces in its clone as plain text. Results of the user's own login are left out of this part.
 
-A local provider is a command: the query in its arguments, the scope in the environment, one result per line on stdout, `path:line<TAB>snippet`.
+With `--here` both parts are limited to the project of the current directory, and only the hub that holds it is asked. A query goes to a hub's search only for what is kept in that hub; no other remote provider exists.
 
 A hub's search, when `README.md` names one. The client sends its token only to the host of the hub's git remote, and ignores a `search` address on any other host.
 
