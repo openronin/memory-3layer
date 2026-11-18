@@ -668,6 +668,7 @@ memory-3layer — agent memory that belongs to no harness
   refresh [--debounce]                          rebuild the search index
   guard                                         PreToolUse hook: block secrets, allow the data dir
   secret <command>                              local secret store: put, list, run, scan...
+  hub init|upgrade <clone dir> | add <name> <remote> --login <login>   memory hubs: docs/hub.md
   task open|log|resume|show|files|list|close|redact   task journals; open, log and close take text on stdin: docs/tasks.md
   state                                         active and recently closed tasks (same as task list)
   core init | stash <title> | brief             CORE.md: put a project on it, archive a part, see the brief
@@ -695,6 +696,7 @@ case "$cmd" in
       rc=$?; cmd_tick_notes; exit $rc
     fi
     MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" exec bash "$SELF_DIR/memory-sync.sh" "$@" ;;
+  hub) MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" exec bash "$SELF_DIR/memory-hub.sh" "$@" ;;
   install-cli) cmd_install_cli "$@" ;;
   migrate)
     if (( BASH_VERSINFO[0] < 4 )); then

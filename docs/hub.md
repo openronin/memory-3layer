@@ -1,6 +1,6 @@
 # Memory hub protocol
 
-Status: draft, `contract: 1`. Nothing here is implemented yet.
+Status: draft, `contract: 1`. Implemented in the client so far: `hub init`, `hub upgrade`, `hub add`, and sync into a member's namespace. The rest is not.
 
 This is the contract between the memory-3layer client and a memory hub. The client side is this repository. A hosting service (xchg.app is the first) implements the hub side from this text alone, the way it reads a mail hub from the xchg contract.
 
@@ -58,11 +58,13 @@ A key of the form `local/<path>` belongs to one machine. The client does not sen
 - Inside `@<login>/` a client may write files this text does not name, and a service keeps them without reading them. A new path at the root, or directly under `identity/` or `projects/<key>/`, comes only with a new contract number.
 - Routing rules are not in the hub. Which hub holds a project is local configuration, and a new machine restores it from the hubs it connects: a project lives in the hub that has `projects/<key>/@<login>/`. The user names only the default hub, and the hub for a project found in two.
 
-`README.md` is written by the client's `hub init` and `hub upgrade` commands and by nothing else. Who may run them is up to the hub: on a plain git hosting any member, on xchg.app only the service's own member. Its header:
+`README.md` is written by the client's `hub init` and `hub upgrade` commands and by nothing else. Who may run them is up to the hub: on a plain git hosting any member, on xchg.app only the service's own member. Its header, between two `---` lines at the top of the file:
 
+    ---
     contract: 1
     template: 7.3.0
     search: https://hub.example.com/api/memory/<hub>/search
+    ---
 
 `contract` is the layout version. A client of another contract version does not write to the hub. `template` is the client release the text came from. `search` is present only when the hub offers it.
 

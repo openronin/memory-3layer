@@ -453,6 +453,35 @@ raced "$RK/CORE.md" "core local during merge"
 ok "race: local CORE keeps the name" "$(grep -c 'core local during merge' "$(data ra)/$RK/CORE.md")" 1
 ok "race: remote CORE kept beside it" "$(cat "$(data ra)/$RK/superseded/conflict-remote/CORE.md")" "core from b"
 
+# --- memory hub: a namespace per member (docs/hub.md) ---
+HB=$(bare hub); HK=projects/github.com/o/hub
+git clone -q "$HB" "$T/hubclone" 2>/dev/null
+on m1 hub init "$T/hubclone" --search https://hub.example/search >/dev/null
+git -C "$T/hubclone" push -q origin main
+ok "hub: init writes the contract" "$(git -C "$HB" show main:README.md | sed -n '2p;4p' | tr '\n' ' ')" "contract: 1 search: https://hub.example/search "
+on m1 hub init "$T/hubclone" >/dev/null 2>&1; ok "hub: init refuses a hub" $? 1
+mkdir -p "$T/m1" "$T/m2" "$T/m3"
+on m1 hub add team "$HB" --login alice >/dev/null
+on m2 hub add team "$HB" --login alice >/dev/null
+on m3 hub add team "$HB" --login bob >/dev/null
+mk m1 identity/IDENTITY.md "alice"
+mk m1 "$HK/CORE.md" "alice knows"
+mk m1 "$HK/_tasks/t1.md" "## 2026-01-01T00:00:00Z-aaaa open s:1"
+mk m3 "$HK/CORE.md" "bob knows"
+on m1 sync --quiet; ok "hub: first member syncs" $? 0
+on m3 sync --quiet; ok "hub: second member syncs" $? 0
+ok "hub: files go under the member's login" "$(git -C "$HB" show "main:$HK/@alice/CORE.md"):$(git -C "$HB" show "main:$HK/@bob/CORE.md")" "alice knows:bob knows"
+ok "hub: identity is namespaced too" "$(git -C "$HB" show main:identity/@alice/IDENTITY.md)" alice
+ok "hub: nothing outside the layout" "$(git -C "$HB" ls-tree -r --name-only main | grep -vE '^(README\.md|contacts\.md|identity/@|projects/.*/@)' | wc -l | tr -d ' ')" 0
+ok "hub: both are in the contact book" "$(git -C "$HB" show main:contacts.md | grep -cE '^\| (alice|bob) \|')" 2
+on m1 sync --quiet
+ok "hub: another member's memory stays out of the data dir" "$(rd m1 "$HK/CORE.md"):$(exists m1 identity/@bob):$(exists m1 "$HK/@bob")" "alice knows:1:1"
+on m2 sync --quiet
+ok "hub: the member's other machine gets it" "$(rd m2 "$HK/CORE.md"):$(rd m2 identity/IDENTITY.md):$(rd m2 "$HK/_tasks/t1.md" | wc -l | tr -d ' ')" "alice knows:alice:1"
+rm "$(data m1)/$HK/_tasks/t1.md"; on m1 sync --quiet; on m2 sync --quiet
+ok "hub: a deletion travels inside the namespace" "$(exists m2 "$HK/_tasks/t1.md"):$(git -C "$HB" show "main:$HK/@bob/CORE.md")" "1:bob knows"
+sed -i.bak '/^login/d' "$(conf m3)"; on m3 sync --quiet 2>/dev/null; ok "hub: no login, no sync" $? 1
+
 # --- tick ---
 waitsync() { local i; for i in $(seq 1 50); do [[ -z "$(find "$T/$1" -name '*.lock' 2>/dev/null)" ]] && return; sleep 0.1; done; }
 stamp_time() { stat -c %Y "$TL" 2>/dev/null || stat -f %m "$TL"; }

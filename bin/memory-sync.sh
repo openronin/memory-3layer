@@ -47,6 +47,10 @@ declare -A ACCESS=()
 NET_WHY=""
 declare -A SKIPPED=()
 ARRIVED=()
+# This member's login when the storage being synced is a memory hub (docs/hub.md), else empty.
+HUB_LOGIN=""
+HUB_SHARED=0
+CONTRACT=1
 
 say() { [[ $QUIET -eq 1 ]] || printf '%s\n' "$*"; }
 
@@ -84,7 +88,7 @@ read_conf() {
     if [[ -n "$storage" ]]; then
       case "$k" in
         ssh_key|ssh_agent) ACCESS[$storage|$k]=${v/#\~/$HOME} ;;
-        username) ACCESS[$storage|$k]=$v ;;
+        username|login) ACCESS[$storage|$k]=$v ;;
         password)
           if [[ "$v" == secret://* ]]; then
             ACCESS[$storage|$k]=${v#secret://}
@@ -165,6 +169,74 @@ path_key() {
     */superseded/*) printf '%s' "${p%%/superseded/*}" ;;
     *) printf '%s' "${p%/*}" ;;
   esac
+}
+
+# --- memory hubs --------------------------------------------------------------
+# In a hub a member's files sit under @<login>. The data directory has no such level:
+# it holds one person's memory, so the two differ only by this mapping.
+
+to_clone() {
+  # to_clone <path in the data dir>: where it is in the clone.
+  local p=$1 k
+  [[ -n "$HUB_LOGIN" ]] || { printf '%s' "$p"; return; }
+  case "$p" in
+    identity/*) printf 'identity/@%s/%s' "$HUB_LOGIN" "${p#identity/}" ;;
+    projects/*) k=$(path_key "$p"); printf 'projects/%s/@%s/%s' "$k" "$HUB_LOGIN" "${p#projects/"$k"/}" ;;
+    *) printf '%s' "$p" ;;
+  esac
+}
+
+from_clone() {
+  # from_clone <path in the clone>: where it is in the data dir. Nothing for what is not
+  # this member's memory: another member's namespace, the hub's own files.
+  local c=$1 rest key tail
+  [[ -n "$HUB_LOGIN" ]] || { printf '%s' "$c"; return; }
+  case "$c" in
+    aliases.tsv) printf '%s' "$c" ;;
+    identity/@"$HUB_LOGIN"/*) printf 'identity/%s' "${c#identity/@"$HUB_LOGIN"/}" ;;
+    projects/*/@*)
+      # A key has no segment starting with @, so it ends before the first one.
+      rest=${c#projects/}; key=${rest%%/@*}; tail=${rest#"$key"/@}
+      [[ "${tail%%/*}" == "$HUB_LOGIN" && "$tail" == */* ]] && printf 'projects/%s/%s' "$key" "${tail#*/}" ;;
+  esac
+  return 0
+}
+
+readme_header() {
+  # readme_header <key>: a value from the header of the hub's README, read from stdin.
+  awk -v k="$1" 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit }
+    index($0, k ": ") == 1 { print substr($0, length(k) + 3); exit }'
+}
+
+hub_mode() {
+  # Sets HUB_LOGIN for the current storage. Fails with a reason when it is a hub this
+  # machine can't write to.
+  local has
+  HUB_LOGIN=""; HUB_SHARED=0
+  if git -C "$CLONE" rev-parse -q --verify "origin/$BRANCH" >/dev/null 2>&1; then
+    has=$(git -C "$CLONE" show "origin/$BRANCH:README.md" 2>/dev/null | readme_header contract)
+  else
+    has=$(readme_header contract < "$CLONE/README.md" 2>/dev/null)
+  fi
+  [[ -n "$has" ]] || return 0
+  if [[ "$has" != "$CONTRACT" ]]; then
+    NET_WHY="the hub is on contract $has, this client knows $CONTRACT"; return 1
+  fi
+  HUB_LOGIN=${ACCESS[$ADDR|login]:-}
+  if [[ ! "$HUB_LOGIN" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+    HUB_LOGIN=""; NET_WHY="this is a memory hub: set login = <your login> under [storage $ADDR] in $LOCAL_CONF"; return 1
+  fi
+  return 0
+}
+
+contact_row() {
+  # A member is in the hub's contact book. Others in it mean the hub is shared.
+  local c="$CLONE/contacts.md"
+  [[ -n "$HUB_LOGIN" ]] || return 0
+  [[ -f "$c" ]] || printf '# Contacts\n\n| login | name | aliases | contact |\n|---|---|---|---|\n' > "$c"
+  grep -qF "| $HUB_LOGIN |" "$c" || printf '| %s | %s |  |  |\n' "$HUB_LOGIN" "$HUB_LOGIN" >> "$c"
+  [[ $(grep -cE '^\| [a-z0-9]' "$c") -gt 1 ]] && HUB_SHARED=1
+  return 0
 }
 
 has_password() { [[ "$1" =~ ://[^/@:]+:[^/@]+@ ]]; }
@@ -324,7 +396,10 @@ copy_out() {
   # that differs follows the conflict rule instead of silently replacing the remote.
   local addr=$1 first=$2 p f c loser
   while IFS= read -r p; do
-    f="$DATA/$p"; c="$CLONE/$p"
+    # Routing is local, and a path that belongs to one machine stays out of a shared hub.
+    [[ -n "$HUB_LOGIN" && "$p" == routing.conf ]] && continue
+    [[ $HUB_SHARED -eq 1 && "$p" == projects/local/* ]] && continue
+    f="$DATA/$p"; c="$CLONE/$(to_clone "$p")"
     [[ -f "$c" ]] && cmp -s "$f" "$c" && continue
     if ! bash "$SELF_DIR/memory-secrets.sh" scan "$f" >/dev/null; then
       SKIPPED[$p]=1
@@ -338,10 +413,10 @@ copy_out() {
     if [[ "$first" == 1 && -f "$c" ]]; then
       loser=$(loser_path "$p" "$HOST")
       if theirs_is_newer "$f" "$c" "$(mtime "$f")" "$(mtime "$c")"; then
-        put "$f" "$CLONE/$loser"
+        put "$f" "$CLONE/$(to_clone "$loser")"
         continue
       fi
-      put "$c" "$CLONE/$(loser_path "$p" remote)"
+      put "$c" "$CLONE/$(to_clone "$(loser_path "$p" remote)")"
     fi
     put "$f" "$c"
   done < <(routed_files "$addr")
@@ -377,14 +452,16 @@ remove_deleted() {
   # the route arrived later), and their absence is not a deletion.
   # Many deletions at once look like an accident, not a decision: they are not
   # applied, and copy_in brings the files back, unless the user asked with --allow-deletes.
-  local addr=$1 p rest k counted=0
+  local addr=$1 p c rest k counted=0
   local -a gone=()
   [[ -f "$CLONE.seen" ]] || return 0
   while IFS= read -r p; do
     [[ -n "$p" ]] || continue
-    [[ -e "$DATA/$p" || ! -e "$CLONE/$p" ]] && continue
+    [[ -e "$DATA/$p" ]] && continue
+    c=$(to_clone "$p")
+    [[ -e "$CLONE/$c" ]] || continue
     [[ "$(route_path "$p")" == "$addr" ]] || continue
-    gone+=("$p")
+    gone+=("$c")
     # A closed task moved into the archive is not a loss.
     if [[ "$p" == projects/*/_tasks/* && "$p" != */_tasks/archive/* ]]; then
       k=${p%%/_tasks/*}; rest=${p#*/_tasks/}
@@ -412,6 +489,7 @@ write_elsewhere() {
   local addr=$1 p k r
   local -A done_=()
   while IFS= read -r p; do
+    p=$(from_clone "$p")
     [[ "$p" == projects/*/* ]] || continue
     r=$(route_path "$p"); [[ "$r" == "$addr" ]] && continue
     k=$(path_key "$p"); [[ -z "${done_[$k]:-}" ]] || continue
@@ -424,7 +502,8 @@ write_aliases() {
   # An alias names a project, so it goes only to that project's own storage.
   local addr=$1 old new
   [[ -f "$DATA/aliases.tsv" ]] || return 0
-  [[ -f "$CLONE/.gitattributes" ]] || printf 'aliases.tsv merge=union\n' > "$CLONE/.gitattributes"
+  # A hub's root holds only what its contract names; resolve_conflicts joins the lines there.
+  [[ -n "$HUB_LOGIN" || -f "$CLONE/.gitattributes" ]] || printf 'aliases.tsv merge=union\n' > "$CLONE/.gitattributes"
   while IFS=$'\t' read -r old new; do
     [[ -n "$new" ]] || continue
     if [[ "$(route "$new" project)" == "$addr" ]]; then
@@ -458,6 +537,9 @@ resolve_conflicts() {
       mkdir -p "$(dirname "$CLONE/$p")"; cp "$theirs" "$CLONE/$p"
     elif is_journal "$p"; then
       merge_journals "$ours" "$theirs" > "$CLONE/$p"
+    elif [[ "$p" == aliases.tsv || "$p" == contacts.md ]]; then
+      # Lists that members only add lines to.
+      awk '!seen[$0]++' "$ours" "$theirs" > "$CLONE/$p"
     elif theirs_is_newer "$ours" "$theirs" "$(g log -1 --format=%ct HEAD -- "$p")" "$(g log -1 --format=%ct "origin/$BRANCH" -- "$p")"; then
       mkdir -p "$(dirname "$CLONE/$(loser_path "$p" "$HOST")")"
       cp "$ours" "$CLONE/$(loser_path "$p" "$HOST")"
@@ -483,20 +565,20 @@ merge_remote() {
 }
 
 keep_local_write() {
-  # keep_local_write <path> <commit before the merge>. Sessions keep writing while a sync
-  # runs. Succeeds if the data dir has a write made after copy_out and it has been kept;
-  # it reaches the storage at the next sync.
-  local p=$1 pre=$2 before after here merged
-  before=$(git -C "$CLONE" rev-parse -q --verify "$pre:$p" 2>/dev/null || true)
-  after=$(git -C "$CLONE" rev-parse -q --verify "HEAD:$p" 2>/dev/null || true)
+  # keep_local_write <path> <its path in the clone> <commit before the merge>. Sessions keep
+  # writing while a sync runs. Succeeds if the data dir has a write made after copy_out and
+  # it has been kept; it reaches the storage at the next sync.
+  local p=$1 c=$2 pre=$3 before after here merged
+  before=$(git -C "$CLONE" rev-parse -q --verify "$pre:$c" 2>/dev/null || true)
+  after=$(git -C "$CLONE" rev-parse -q --verify "HEAD:$c" 2>/dev/null || true)
   [[ "$before" == "$after" ]] && return 0
   here=$(git -C "$CLONE" hash-object --no-filters "$DATA/$p")
   [[ "$here" == "$before" ]] && return 1
   if is_journal "$p"; then
     merged="$DATA/$p.$$.tmp"
-    merge_journals "$DATA/$p" "$CLONE/$p" > "$merged" && mv -f "$merged" "$DATA/$p"
+    merge_journals "$DATA/$p" "$CLONE/$c" > "$merged" && mv -f "$merged" "$DATA/$p"
   else
-    put "$CLONE/$p" "$DATA/$(loser_path "$p" remote)"
+    put "$CLONE/$c" "$DATA/$(loser_path "$p" remote)"
   fi
   return 0
 }
@@ -504,9 +586,11 @@ keep_local_write() {
 copy_in() {
   # Clone -> data dir, for files routed here. A file held back for a secret keeps its
   # local version, otherwise the older remote copy would overwrite it.
-  local addr=$1 pre=$2 p old new
-  while IFS= read -r p; do
-    case "$p" in .gitattributes) continue ;; esac
+  local addr=$1 pre=$2 p c old new
+  while IFS= read -r c; do
+    case "$c" in .gitattributes) continue ;; esac
+    p=$(from_clone "$c")
+    [[ -n "$p" ]] || continue
     if [[ "$p" == aliases.tsv ]]; then
       mkdir -p "$DATA"
       while IFS=$'\t' read -r old new; do
@@ -517,14 +601,15 @@ copy_in() {
     fi
     [[ -n "${SKIPPED[$p]:-}" ]] && continue
     [[ "$(route_path "$p")" == "$addr" ]] || continue
-    cmp -s "$CLONE/$p" "$DATA/$p" 2>/dev/null && continue
+    cmp -s "$CLONE/$c" "$DATA/$p" 2>/dev/null && continue
     if [[ -n "$pre" && -f "$DATA/$p" ]]; then
-      keep_local_write "$p" "$pre" && continue
+      keep_local_write "$p" "$c" "$pre" && continue
     fi
-    put "$CLONE/$p" "$DATA/$p"
+    put "$CLONE/$c" "$DATA/$p"
   done < <(git -C "$CLONE" ls-files)
   if [[ -n "$pre" ]]; then
     while IFS= read -r p; do
+      [[ -n "$p" ]] && p=$(from_clone "$p")
       [[ -n "$p" && -z "${SKIPPED[$p]:-}" ]] || continue
       [[ "$(route_path "$p")" == "$addr" ]] && rm -f "$DATA/$p"
     done < <(git -C "$CLONE" diff --name-only --diff-filter=D "$pre" HEAD)
@@ -538,6 +623,7 @@ note_arrivals() {
   # its task index is from the session start and would miss them.
   local addr=$1 pre=$2 st p rest kind
   while IFS=$'\t' read -r st p; do
+    p=$(from_clone "$p")
     [[ "$p" == projects/*/_tasks/*.md && "$p" != */superseded/* && "$p" != *.files/* ]] || continue
     [[ -z "${SKIPPED[$p]:-}" && "$(route_path "$p")" == "$addr" ]] || continue
     case "$p:$st" in
@@ -562,6 +648,7 @@ write_state() {
 
 sync_store() {
   local ADDR=$1 CLONE BRANCH base pre first=0 lock
+  HUB_LOGIN=""; HUB_SHARED=0
   local id; id=$(store_id "$ADDR")
   CLONE="$STORES/$id"
   mkdir -p "$STORES"
@@ -621,9 +708,16 @@ sync_store() {
     fi
   fi
 
+  if ! hub_mode; then
+    write_state "$CLONE" fail "$NET_WHY"
+    printf '%s: %s, not synced\n' "$ADDR" "$NET_WHY" >&2
+    rmdir "$lock"; return 1
+  fi
+
   base=$(cat "$CLONE.base" 2>/dev/null || true)
   [[ -n "$base" ]] || first=1
   SKIPPED=()
+  contact_row
   drop_stale_journals "$ADDR"
   copy_out "$ADDR" "$first"
   remove_deleted "$ADDR"
@@ -805,7 +899,7 @@ cmd_check() {
 }
 
 cmd_status() {
-  local addr id clone st ts rest ahead moved p
+  local addr id clone st ts rest ahead moved p ADDR CLONE BRANCH
   load_conf
   mapfile -t stores < <(all_stores)
   [[ ${#stores[@]} -gt 0 ]] || { echo "No storage configured."; return 0; }
@@ -818,7 +912,10 @@ cmd_status() {
     ahead=0; moved=0
     if [[ -d "$clone/.git" ]]; then
       ahead=$(git -C "$clone" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
+      ADDR=$addr; CLONE=$clone; BRANCH=$(git -C "$clone" symbolic-ref --short HEAD 2>/dev/null || echo main)
+      hub_mode || true
       while IFS= read -r p; do
+        p=$(from_clone "$p")
         # Only memory counts: a storage can hold its own README and the like.
         case "$p" in identity/*|projects/*|routing.conf) ;; *) continue ;; esac
         [[ "$(route_path "$p")" == "$addr" ]] || moved=$((moved + 1))
