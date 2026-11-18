@@ -1,6 +1,6 @@
 # Memory hub protocol
 
-Status: draft, `contract: 1`. Implemented in the client so far: `hub init`, `hub upgrade`, `hub add`, sync into a member's namespace, the revision in records, `CORE.log`, the watch on lines at the user's word, other members' tasks in the index, routes learned from a connected hub, search, `core adopt`, `hub contact rm`.
+Status: draft, `contract: 1`. Implemented in the client so far: `hub init`, `hub upgrade`, `hub add`, sync into a member's namespace, the revision in records, `CORE.log`, the watch on lines at the user's word, other members' tasks in the index, routes learned from a connected hub, search, `hub contact rm`.
 
 This is the contract between the memory-3layer client and a memory hub. The client side is this repository. A hosting service (xchg.app is the first) implements the hub side from this text alone, the way it reads a mail hub from the xchg contract.
 
@@ -175,8 +175,8 @@ How results are ranked is the service's business. Results from different provide
 ## Migration
 
 1. In the hub, the project's files go under `projects/<key>/@<login>/`. Sync does this by itself, and nothing moves in the local directory.
-2. `memory-3layer core adopt`, run in the project, moves `project.md` into `CORE.md` under `# Project notes`, with its list entries marked `[user <date of the file>]`. The old file is kept as `superseded/project.md`.
-3. The same command lists the repository's `CLAUDE.md`, `AGENTS.md` and `.claude-docs/`. The agent checks each fact against the code and moves what still holds into `CORE.md`, unmarked. It deletes nothing in the repository: removing those files is a commit the user asks for. A file that is the memory protocol itself is named as such and left alone.
+2. What `project.md` held is moved into `CORE.md` as lines marked `[user <date>]`. The client has no command for it: a `project.md` that is still there keeps being read at session start.
+3. Knowledge kept in the repository (`CLAUDE.md`, `AGENTS.md`, `.claude-docs/`) is moved by the agent: each fact checked against the code, what still holds written into `CORE.md` unmarked. Removing those files is a commit the user asks for.
 
 Moving a project into a team hub publishes its whole memory to the team, old journals included. The client says so and asks before the first push.
 

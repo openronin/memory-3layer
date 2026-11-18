@@ -814,7 +814,7 @@ memory-3layer — agent memory that belongs to no harness
   hub init|upgrade <clone dir> | add <name> <remote> --login <login> | contact rm <clone dir> <login>   memory hubs: docs/hub.md
   task open|log|resume|show|files|list|close|redact   task journals; open, log and close take text on stdin: docs/tasks.md
   state                                         active and recently closed tasks (same as task list)
-  core init | stash <title> | adopt | brief     CORE.md: put a project on it, archive a part, bring in project.md and repo docs
+  core init | stash <title> | brief             CORE.md: put a project on it, archive a part, see the brief
 USAGE
 }
 

@@ -15,7 +15,7 @@ The split:
 | Rotated | mechanically, when the task closes | by the agent, when the size warning fires |
 | Loaded | index line at start; the rest on request | the `# Brief` block at start; the rest on request |
 
-`project.md` held what changes only at the user's word. That now lives in `CORE.md` as lines ending in `[user YYYY-MM-DD]`, which the agent does not remove, change or archive without permission; `memory-3layer core adopt` moves an existing `project.md` there. The rest of `CORE.md` is the agent's own judgment.
+`project.md` held what changes only at the user's word. That now lives in `CORE.md` as lines ending in `[user YYYY-MM-DD]`, which the agent does not remove, change or archive without permission. The rest of `CORE.md` is the agent's own judgment.
 
 ## Files
 
