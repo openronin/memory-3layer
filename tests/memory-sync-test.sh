@@ -482,6 +482,15 @@ rm "$(data m1)/$HK/_tasks/t1.md"; on m1 sync --quiet; on m2 sync --quiet
 ok "hub: a deletion travels inside the namespace" "$(exists m2 "$HK/_tasks/t1.md"):$(git -C "$HB" show "main:$HK/@bob/CORE.md")" "1:bob knows"
 sed -i.bak '/^login/d' "$(conf m3)"; on m3 sync --quiet 2>/dev/null; ok "hub: no login, no sync" $? 1
 
+# --- a refused push is shown and not repeated until something changes ---
+printf '#!/bin/sh\necho "memory-3layer: over the limit" >&2\nexit 1\n' > "$HB/hooks/pre-receive"; chmod +x "$HB/hooks/pre-receive"
+mk m1 "$HK/CORE.md" "alice knows more"
+case "$(on m1 sync 2>&1)" in *"memory-3layer: over the limit"*) r=y ;; *) r=n ;; esac; ok "refused: the server's line is shown" $r y
+rm "$HB/hooks/pre-receive"
+case "$(on m1 sync 2>&1)" in *"nothing changed since"*) r=y ;; *) r=n ;; esac; ok "refused: not repeated" $r y
+mk m1 "$HK/CORE.md" "alice knows even more"; on m1 sync --quiet
+ok "refused: a change is sent again" "$(git -C "$HB" show "main:$HK/@alice/CORE.md")" "alice knows even more"
+
 # --- tick ---
 waitsync() { local i; for i in $(seq 1 50); do [[ -z "$(find "$T/$1" -name '*.lock' 2>/dev/null)" ]] && return; sleep 0.1; done; }
 stamp_time() { stat -c %Y "$TL" 2>/dev/null || stat -f %m "$TL"; }

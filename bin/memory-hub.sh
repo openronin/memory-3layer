@@ -11,7 +11,13 @@ TEMPLATE="$SELF_DIR/../templates/hub/README.md"
 CONTRACT=1
 
 die() { printf 'memory-3layer: %s\n' "$*" >&2; exit 1; }
-g() { git -C "$DIR" -c user.name=memory-3layer -c user.email=memory-3layer@localhost -c core.hooksPath=/dev/null -c commit.gpgsign=false "$@"; }
+g() {
+  # The author is whoever runs the command; a machine with no git identity still commits.
+  local -a who=()
+  git -C "$DIR" config user.name >/dev/null 2>&1 || who+=(-c user.name=memory-3layer)
+  git -C "$DIR" config user.email >/dev/null 2>&1 || who+=(-c user.email=memory-3layer@localhost)
+  git -C "$DIR" ${who[@]+"${who[@]}"} -c core.hooksPath=/dev/null -c commit.gpgsign=false "$@"
+}
 
 header() {
   # header <file> <key>: a value from the README header, or nothing.

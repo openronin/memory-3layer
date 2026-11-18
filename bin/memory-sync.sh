@@ -45,6 +45,7 @@ TICK_SECONDS=${MEMORY_3LAYER_TICK_SECONDS:-300}
 declare -A RULE=()
 declare -A ACCESS=()
 NET_WHY=""
+NET_REMOTE=""
 declare -A SKIPPED=()
 ARRIVED=()
 # This member's login when the storage being synced is a memory hub (docs/hub.md), else empty.
@@ -288,7 +289,7 @@ loser_path() {
   printf '%s/superseded/conflict-%s/%s' "$dir" "$host" "${p##*/}"
 }
 
-is_journal() { [[ "$1" == */_tasks/*.md && "$1" != */superseded/* ]]; }
+is_journal() { [[ ( "$1" == */_tasks/*.md || "$1" == */CORE.log.*.md ) && "$1" != */superseded/* ]]; }
 
 merge_journals() {
   # merge_journals <a> <b>: a journal is a set of records, so a conflict means joining
@@ -344,6 +345,7 @@ classify() {
   local e; e=$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')
   [[ "$1" == 124 || "$1" == 142 ]] && { printf 'unreachable'; return; }
   case "$e" in
+    *"remote rejected"*|*"hook declined"*) printf 'refused' ;;
     *"host key verification failed"*) printf 'host key not trusted' ;;
     *"permission denied"*|*"authentication failed"*|*"could not read username"*|*"could not read password"*|*"not allowed"*|*"access denied"*|*"not authorized"*|*" 401"*|*" 403"*) printf 'access denied' ;;
     *"could not resolve"*|*"timed out"*|*"connection refused"*|*"network is unreachable"*|*"no route to host"*|*"connection reset"*|*"closed by remote host"*) printf 'unreachable' ;;
@@ -384,6 +386,8 @@ net_git() {
   err=$(env "${envs[@]}" GIT_SSH_COMMAND="$ssh" "${wrap[@]}" "${LIMIT[@]}" git "${opts[@]}" "$@" 2>&1 >/dev/null) || rc=$?
   [[ $rc -eq 0 ]] && return 0
   NET_WHY=$(classify "$rc" "$err")
+  # What the server itself said. git's own text is never shown: it can hold an address.
+  NET_REMOTE=$(printf '%s\n' "$err" | sed -nE 's/^remote:[[:space:]]*//p' | sed '/^$/d')
   return "$rc"
 }
 
@@ -729,6 +733,14 @@ sync_store() {
   copy_in "$ADDR" "$pre"
   note_arrivals "$ADDR" "$pre"
 
+  # A push the server refused is not repeated until there is something new to send:
+  # the answer would be the same, and each try costs the server a check.
+  if [[ "$MODE" == full && "$(head -n1 "$CLONE.refused" 2>/dev/null)" == "$(git -C "$CLONE" rev-parse -q --verify HEAD 2>/dev/null)" ]]; then
+    write_seen "$ADDR"
+    write_state "$CLONE" fail "push refused: $(sed -n 2p "$CLONE.refused")"
+    say "$ADDR: the last push was refused and nothing changed since: $(sed -n 2p "$CLONE.refused")"
+    rmdir "$lock"; return 1
+  fi
   if [[ "$MODE" == full ]] && git -C "$CLONE" rev-parse -q --verify HEAD >/dev/null 2>&1; then
     if ! net_git -C "$CLONE" push -q origin "$BRANCH"; then
       # Another machine pushed in between: take its changes and try once more.
@@ -741,13 +753,20 @@ sync_store() {
       if ! net_git -C "$CLONE" push -q origin "$BRANCH"; then
         git -C "$CLONE" rev-parse HEAD > "$CLONE.base"
         write_seen "$ADDR"
-        write_state "$CLONE" fail "push: $NET_WHY"
-        printf '%s: push: %s, will retry at the next sync\n' "$ADDR" "$NET_WHY" >&2
+        if [[ "$NET_WHY" == refused ]]; then
+          { git -C "$CLONE" rev-parse HEAD; printf '%s\n' "${NET_REMOTE:-no reason given}" | paste -sd' ' -; } > "$CLONE.refused"
+          write_state "$CLONE" fail "push refused: $(sed -n 2p "$CLONE.refused")"
+          printf '%s: the server refused the push, the data stays here:\n%s\n' "$ADDR" "${NET_REMOTE:-no reason given}" >&2
+        else
+          write_state "$CLONE" fail "push: $NET_WHY"
+          printf '%s: push: %s, will retry at the next sync\n' "$ADDR" "$NET_WHY" >&2
+        fi
         rmdir "$lock"; return 1
       fi
     fi
   fi
   git -C "$CLONE" rev-parse -q --verify HEAD > "$CLONE.base" 2>/dev/null
+  rm -f "$CLONE.refused"
   write_seen "$ADDR"
   write_elsewhere "$ADDR"
   write_state "$CLONE" ok ""

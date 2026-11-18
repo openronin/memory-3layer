@@ -232,6 +232,15 @@ task_nudge() {
     $((n + 1)) "${active:+, or task log if it belongs to an open one ($active)}"
 }
 
+core_changed() {
+  # CORE.md of this project is newer than the copy the last log record was made from.
+  # Runs on every tool call, so it only compares two times.
+  local core snap
+  core="$(project_dir)/CORE.md"; [[ -f "$core" ]] || return 1
+  snap="$STATE_DIR/core/$(project_key | cksum | cut -d' ' -f1)"
+  [[ ! -f "$snap" || "$core" -nt "$snap" ]]
+}
+
 cmd_tick_notes() {
   # After a tick: on Stop count the turn; on PostToolUse tell the agent about tasks that
   # came in with a sync, and once about a session that works without a task.
@@ -246,8 +255,10 @@ cmd_tick_notes() {
     return 0
   fi
   [[ "$event" == PostToolUse ]] || return 0
+  f="$STATE_DIR/notices/$(project_key | cksum | cut -d' ' -f1)"
+  if [[ -s "$f" ]]; then out=$(paste -sd' ' "$f"); rm -f "$f"; fi
   list=$(take_arrived | paste -sd, - | sed 's/,/, /g')
-  [[ -z "$list" ]] || out="TASKS CHANGED ON ANOTHER MACHINE, brought by sync just now: $list. The task index from the session start doesn't have this. Before continuing one of them, or if it bears on the current work, read it with memory-3layer task show <name>."
+  [[ -z "$list" ]] || out="${out:+$out }TASKS CHANGED ON ANOTHER MACHINE, brought by sync just now: $list. The task index from the session start doesn't have this. Before continuing one of them, or if it bears on the current work, read it with memory-3layer task show <name>."
   list=$(task_nudge "$sid") && out="${out:+$out }$list"
   [[ -n "$out" ]] || return 0
   printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"%s"}}\n' "$(json_escape "$out")"
@@ -701,7 +712,8 @@ case "$cmd" in
   sync)
     if [[ "${1:-}" == tick ]]; then
       MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" bash "$SELF_DIR/memory-sync.sh" "$@" </dev/null
-      rc=$?; cmd_tick_notes; exit $rc
+      rc=$?; core_changed && tasks core log >/dev/null 2>&1
+      cmd_tick_notes; exit $rc
     fi
     MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" exec bash "$SELF_DIR/memory-sync.sh" "$@" ;;
   hub) MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" exec bash "$SELF_DIR/memory-hub.sh" "$@" ;;

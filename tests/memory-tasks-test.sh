@@ -251,4 +251,16 @@ printf 'goal\n' | m task open rev >/dev/null; printf 'step with a revision\n' | 
 ok "revision: in the header" "$(grep -c " next s:[^ ]* r:$(git -C "$R" rev-parse --short HEAD) b:feat/x\$" "$J/rev.md")" 1
 has "revision: such a record is read" "$(m task show rev --brief)" "step with a revision"
 
+# --- CORE.md changes are logged with the revision; a line at the user's word is watched ---
+tick() { printf '{"hook_event_name":"PostToolUse","session_id":"sess-one"}' | m sync tick; }
+printf '\n# Rules\n- Never restart the queue by hand. [user 2026-11-18]\n- plain fact\n' >> "$P/CORE.md"
+tick >/dev/null; sleep 1.1
+logged() { cat "$P"/CORE.log.*.md 2>/dev/null | grep -c "^## .* core s:sess-one r:[0-9a-f]* b:feat/x h:[0-9-]*\$"; }
+was=$(logged); printf -- '- another fact\n' >> "$P/CORE.md"; tick >/dev/null; tick >/dev/null
+ok "core log: one record for the change" "$(( $(logged) - was ))" 1
+has "core log: the record is the diff" "$(cat "$P"/CORE.log.*.md)" "+- another fact"
+sleep 1.1; grep -v 'Never restart' "$P/CORE.md" > "$P/c.tmp"; mv "$P/c.tmp" "$P/CORE.md"
+has "core log: a user line that is gone is reported" "$(tick)" "Never restart the queue by hand"
+ok "core log: reported once" "$(tick)" ""
+
 echo; if [[ $fail -eq 0 ]]; then echo "all $n passed"; else echo "FAILED"; exit 1; fi

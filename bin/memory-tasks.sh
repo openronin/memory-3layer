@@ -29,6 +29,8 @@ BRIEF_BYTES="${CORE_BRIEF_BYTES:-5000}"
 CORE_SOFT="${CORE_SOFT_BYTES:-20000}"
 CORE_HARD="${CORE_HARD_BYTES:-40000}"
 RECENT=5
+# A line of CORE.md that ends this way was written at the user's word.
+USER_MARK='\[user [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\][[:space:]]*$'
 SESSION="${CLAUDE_CODE_SESSION_ID:-}"
 
 # No {n} intervals: mawk doesn't take them everywhere.
@@ -444,6 +446,7 @@ cmd_core() {
   case "$sub" in
     init) core_init "$@" ;;
     stash) core_stash "$@" ;;
+    log) core_log ;;
     brief) brief ;;
     *) die "usage: core init | stash <title> | brief" ;;
   esac
@@ -484,6 +487,35 @@ core_stash() {
   mkdir -p "$PD"
   printf '# [%s] %s\n\n%s\n\n' "$(date -u +%Y-%m-%d)" "$title" "$BODY" >> "$PD/$file" || die "cannot write $file"
   printf 'Stashed. Remove the text from CORE.md and leave this line:\n- %s: see %s\n' "$title" "$file"
+}
+
+core_log() {
+  # Called by hooks when CORE.md is newer than its snapshot. CORE.md is the current state;
+  # each change is appended to CORE.log.YYYY-MM.md as a diff with the code revision, so the
+  # knowledge can be followed against the code. Prints nothing: a notice for the agent
+  # goes to a file the next hook reads.
+  [[ -f "$CORE" ]] || return 0
+  local id snap sum d gone file s=${SESSION:0:8}
+  id=$(printf '%s' "$KEY" | cksum | cut -d' ' -f1); snap="$STATE/core/$id"
+  mkdir -p "$STATE/core"
+  if [[ ! -f "$snap" ]]; then cp "$CORE" "$snap"; return 0; fi
+  if cmp -s "$CORE" "$snap"; then touch "$snap"; return 0; fi
+  sum=$(cksum < "$CORE" | tr -s ' ' '-'); sum=${sum%-}
+  # A change made on another machine comes with its record, and is not logged twice.
+  if ! cat "$PD"/CORE.log.*.md 2>/dev/null | grep -q " h:$sum\$"; then
+    d=$(diff -U1 -L CORE.md -L CORE.md "$snap" "$CORE")
+    # With a secret in it the change is not logged: sync would hold the whole log back.
+    if bash "$SELF_DIR/memory-secrets.sh" scan "$CORE" >/dev/null 2>&1; then
+      file="$PD/CORE.log.$(date -u +%Y-%m).md"
+      printf '## %s core s:%s%s h:%s\n%s\n\n' "$(record_id)" "${s:--}" "${MEMORY_3LAYER_REV:+ $MEMORY_3LAYER_REV}" "$sum" "$d" >> "$file"
+    fi
+    gone=$(grep -E "$USER_MARK" "$snap" | grep -vxF -f <(grep -E "$USER_MARK" "$CORE"; echo) | cut -c1-200)
+    if [[ -n "$gone" ]]; then
+      mkdir -p "$STATE/notices"
+      printf 'CORE.md: a line written at the user'"'"'s word is gone or changed. Such a line is not removed, changed or archived without their permission. If you had it, fine; if not, put it back and ask. Lines: %s\n' "$(printf '%s' "$gone" | paste -sd'|' - | sed 's/|/ | /g')" >> "$STATE/notices/$id"
+    fi
+  fi
+  cp "$CORE" "$snap"
 }
 
 # --- dispatch -----------------------------------------------------------------

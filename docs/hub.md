@@ -1,6 +1,6 @@
 # Memory hub protocol
 
-Status: draft, `contract: 1`. Implemented in the client so far: `hub init`, `hub upgrade`, `hub add`, and sync into a member's namespace. The rest is not.
+Status: draft, `contract: 1`. Implemented in the client so far: `hub init`, `hub upgrade`, `hub add`, sync into a member's namespace, the revision in records, `CORE.log`, the watch on lines at the user's word. The rest is not.
 
 This is the contract between the memory-3layer client and a memory hub. The client side is this repository. A hosting service (xchg.app is the first) implements the hub side from this text alone, the way it reads a mail hub from the xchg contract.
 
@@ -90,9 +90,9 @@ The client only appends to a journal, with two exceptions: `task redact` rewrite
 
 `project.md` is gone. What it held becomes marked lines in `CORE.md`.
 
-**CORE.log.YYYY-MM.md.** Records in the journal format, type `core`, appended by the client when it finds `CORE.md` changed (at sync, and before compaction). The body is the unified diff:
+**CORE.log.YYYY-MM.md.** Records in the journal format, type `core`, appended by the client when a hook of a session in that project finds `CORE.md` changed. The body is the unified diff, and `h` is a checksum of the file after the change, so a change that arrives from the member's other machine is not logged twice:
 
-    ## 2026-11-18T09:20:11Z-7c02 core s:53e2b2ce r:f8b92e4 b:feat/tasks-journal
+    ## 2026-11-18T09:20:11Z-7c02 core s:53e2b2ce r:f8b92e4 b:feat/tasks-journal h:2511885740-274
     <unified diff of CORE.md>
 
 `CORE.md` stays the current state, and the log is the stream of changes tied to code revisions. A revision that was never pushed can't be resolved by anyone else, and then the branch and the time are what is left.
@@ -113,7 +113,7 @@ The client only appends to a journal, with two exceptions: `task redact` rewrite
    - an open journal whose every record is in the archive is dropped: it is a closed task that came back.
 4. What entered a hub stays in its git history.
 
-A hub may refuse a push for reasons of its own: access, a size limit, a path it does not allow. The client shows every line the remote sent, keeps the local data, and tries again at its next sync. A refusal for breaking this contract starts with `memory-3layer:`, and the client tells the agent what to fix. What a service may check under that prefix:
+A hub may refuse a push for reasons of its own: access, a size limit, a path it does not allow. The client shows every line the remote sent, keeps the local data, and does not push again until it has something new to send. A refusal for breaking this contract starts with `memory-3layer:`, and the client tells the agent what to fix. What a service may check under that prefix:
 
 - a change outside the member's namespace (rule 1);
 - `README.md` changed by someone the hub does not let run `hub upgrade`;

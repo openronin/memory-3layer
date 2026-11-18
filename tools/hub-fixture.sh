@@ -45,6 +45,12 @@ cat >> "$W/alice/.local/share/memory-3layer/projects/github.com/acme/api/CORE.md
 # Mongo
 - The legacy index on `events.ts` is a TTL index: dropping it stops the cleanup.
 MD
+# A hook's tick takes the snapshot; the next change of CORE.md becomes a CORE.log record.
+tick() { (cd "$A" && printf '{"hook_event_name":"PostToolUse","session_id":"a1"}' | HOME="$W/alice" CLAUDE_CODE_SESSION_ID=a1 MEMORY_3LAYER_TICK_SECONDS=999999 bash "$BIN" sync tick >/dev/null); }
+tick; sleep 1.1
+printf -- '- The new cluster needs the index before the data.\n' >> "$W/alice/.local/share/memory-3layer/projects/github.com/acme/api/CORE.md"
+tick
+as alice "$A" a1 core stash 'Old deploy notes' <<< 'Deploys used to go through the jump host. Not since October.' >/dev/null
 as alice "$A" a1 task open mongo-move <<< 'Move the events collection to the new cluster without losing the TTL cleanup.' >/dev/null
 as alice "$A" a1 task log mongo-move decision <<< 'Copy with mongodump, not a live sync: the collection is small and a short stop is fine.' >/dev/null
 as alice "$A" a1 task log mongo-move note <<< 'The legacy index is a TTL index. It has to be created on the new cluster before the data arrives.' >/dev/null
