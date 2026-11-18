@@ -46,7 +46,7 @@ ok "codex: no PATH lookup in skills" "$(grep -rl 'command -v memory-3layer' "$Q/
 ok "codex: no Claude manifest" "$(test -e "$Q/.claude-plugin"; echo $?)" 1
 ok "same version in both" "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$Q/.codex-plugin/plugin.json")" "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$P/.claude-plugin/plugin.json")"
 ok "protocol has its frontmatter" "$(sed -n 2p "$Q/skills/protocol/SKILL.md")" "name: protocol"
-case "$(sed -n 6p "$Q/skills/protocol/SKILL.md")" in *'`templates/`'*) r=y ;; *) r=n ;; esac; ok "protocol preamble keeps backticks" $r y
+case "$(sed -n 6p "$Q/skills/protocol/SKILL.md")" in *'`/recall`'*) r=y ;; *) r=n ;; esac; ok "protocol preamble keeps backticks" $r y
 # guard on a Codex patch
 FAKE="ghp""_$(printf 'a1B2%.0s' {1..9})a1"; H=$T/h/.local/share/memory-3layer
 patch() { python3 -c 'import json,sys; print(json.dumps({"tool_name":"apply_patch","cwd":sys.argv[3],"tool_input":{"command":"*** Begin Patch\n*** "+sys.argv[1]+"\n+"+sys.argv[2]+"\n*** End Patch"}}))' "$1" "$2" "${3:-$T}"; }
@@ -62,7 +62,7 @@ ok "patch: secret outside memory isn't its business" "$(patch "Update File: $T/s
 ok "shell: secret into memory blocked" "$(python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":"echo "+sys.argv[1]+" >> "+sys.argv[2]}}))' "$FAKE" "$H/projects/a/SESSION.md" | g)" "rc=2"
 # qwen-code package
 W=$T/w; "$ROOT/tools/package.sh" qwen-code "$W" >/dev/null; ok "qwen: builds" $? 0
-for f in .qwen-plugin/plugin.json .qwen-plugin/marketplace.json hooks/hooks.json bin/memory-3layer scripts/session-start.sh skills/protocol/SKILL.md templates/repo/AGENTS.md; do
+for f in .qwen-plugin/plugin.json .qwen-plugin/marketplace.json hooks/hooks.json bin/memory-3layer scripts/session-start.sh skills/protocol/SKILL.md templates/hub/README.md; do
   ok "qwen: has $f" "$(test -f "$W/$f"; echo $?)" 0
 done
 for f in "$W"/.qwen-plugin/plugin.json "$W"/.qwen-plugin/marketplace.json "$W"/hooks/hooks.json; do python3 -m json.tool "$f" >/dev/null; ok "qwen: valid json ${f##*/}" $? 0; done
@@ -73,7 +73,6 @@ ok "qwen: no Codex manifest" "$(test -e "$W/.codex-plugin" -o -e "$W/.agents"; e
 ok "qwen: same version" "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$W/.qwen-plugin/plugin.json")" "$v"
 ok "qwen: protocol has no CLAUDE.md" "$(grep -c 'CLAUDE\.md' "$W/skills/protocol/SKILL.md")" 0
 ok "qwen: protocol targets AGENTS.md" "$(grep -c 'AGENTS\.md' "$W/skills/protocol/SKILL.md" | sed 's/[1-9][0-9]*/y/')" y
-ok "qwen: no CLAUDE.md template" "$(test -e "$W/templates/repo/CLAUDE.md"; echo $?)" 1
 ok "qwen: skills keep the PATH client" "$(grep -c 'command -v memory-3layer' "$W/skills/codemap/SKILL.md" | sed 's/[1-9][0-9]*/y/')" y
 ok "qwen: no harness home paths in skills" "$(grep -rl '~/\.claude' "$W/skills" | wc -l | tr -d ' ')" 0
 out=$(cd "$T/r" && echo '{"hook_event_name":"SessionStart"}' | HOME="$T/h" bash "$W/scripts/session-start.sh")

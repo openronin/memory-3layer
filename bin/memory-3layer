@@ -334,7 +334,7 @@ Journals are written only through these commands. Keep next current as you work:
 $pd/CORE.md is yours to edit freely: live extracts worth keeping, with the most important in its # Brief block. Before closing a task, move what must outlive it there. Never write a secret value into memory; write secret://<name>.
 TEXT
   if compgen -G "$pd/imported/*/*.md" >/dev/null; then
-    printf '\nNotes imported from a harness are in %s/imported/. They are not reviewed: read them when relevant, verify them, and propose moving what still holds into project.md or the repo docs.\n' "$pd"
+    printf '\nNotes imported from a harness are in %s/imported/. They are not reviewed: read them when relevant, verify them, and move what still holds into CORE.md.\n' "$pd"
   fi
   sync_notes "$pd"
 }
@@ -359,7 +359,7 @@ Client: $SELF_DIR/memory-3layer. Rules for where a fact belongs: the memory prot
 Keep SESSION.md current as you work: decisions with rationale, last action, next step, and a fresh last_updated. Never write a secret value into memory; write secret://<name>.
 TEXT
   if compgen -G "$pd/imported/*/*.md" >/dev/null; then
-    printf '\nNotes imported from a harness are in %s/imported/. They are not reviewed: read them when relevant, verify them, and propose moving what still holds into project.md or the repo docs.\n' "$pd"
+    printf '\nNotes imported from a harness are in %s/imported/. They are not reviewed: read them when relevant, verify them, and move what still holds into CORE.md.\n' "$pd"
   fi
   session_notes "$pd/SESSION.md"
   sync_notes "$pd"

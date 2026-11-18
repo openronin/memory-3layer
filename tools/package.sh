@@ -60,12 +60,6 @@ fi
 # the shared part, dereferenced: a package must stand on its own
 for shared in bin templates LICENSE; do cp -RL "$ROOT/$shared" "$out/$shared"; done
 cp "$ROOT/memory/IDENTITY.md" "$out/templates/IDENTITY.template.md"
-if [ "$name" = qwen-code ]; then
-  mv "$out/templates/repo/CLAUDE.md" "$out/templates/repo/AGENTS.md"
-  for f in "$out"/templates/repo/*.md "$out"/templates/repo/.claude-docs/*.md; do
-    retarget < "$f" > "$f.new" && mv "$f.new" "$f"
-  done
-fi
 chmod +x "$out"/bin/*
 mkdir -p "$out/scripts"; cp "$ROOT"/hooks/*.sh "$out/scripts/"; chmod +x "$out"/scripts/*
 
@@ -80,13 +74,13 @@ mkdir -p "$out/skills/protocol"
   cat <<H
 ---
 name: protocol
-description: The full memory-3layer protocol - which layer a fact belongs to, how to keep SESSION.md, rotation, promotion, secrets. Read it when deciding where to save something, when wrapping up a task, before compaction, or when a memory warning appears.
+description: The full memory-3layer protocol - where a fact goes, tasks and CORE.md, what the user asked to remember, hubs, secrets. Read it when deciding where to save something, when wrapping up a task, before compaction, or when a memory warning appears.
 ---
 
-$naming Templates are in the \`templates/\` directory of this plugin.
+$naming
 
 H
-  sed -E 's#~/\.claude/dist/memory-3layer/templates/#the plugin'"'"'s `templates/` directory, #g' "$ROOT/CLAUDE.md" | retarget
+  retarget < "$ROOT/CLAUDE.md"
 } > "$out/skills/protocol/SKILL.md"
 
 # the package is installed by a plain git clone: with core.autocrlf=true the client would arrive

@@ -96,7 +96,7 @@ hooks/                hook scripts, the same for every harness
 commands/             slash commands; the package turns them into skills
 CLAUDE.md             the protocol; the package turns it into the protocol skill
 harness/<name>/       manifests, hook wiring and the memory importer of one harness
-templates/, memory/   templates for L0, L1a, L1b and the L1 fallback
+templates/, memory/   templates for IDENTITY.md and a memory hub's README
 tools/package.sh      builds a package for one harness
 tools/publish.sh      publishes a package to its repository
 install.sh            manual install into ~/.claude
