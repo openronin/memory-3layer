@@ -387,7 +387,7 @@ net_git() {
   [[ $rc -eq 0 ]] && return 0
   NET_WHY=$(classify "$rc" "$err")
   # What the server itself said. git's own text is never shown: it can hold an address.
-  NET_REMOTE=$(printf '%s\n' "$err" | sed -nE 's/^remote:[[:space:]]*//p' | sed '/^$/d')
+  NET_REMOTE=$(printf '%s\n' "$err" | sed -nE 's/^remote:[[:space:]]*//p' | sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g; s/[[:space:]]+$//; /^$/d')
   return "$rc"
 }
 
