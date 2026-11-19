@@ -468,7 +468,10 @@ mk m1 identity/IDENTITY.md "alice"
 mk m1 "$HK/CORE.md" "alice knows"
 mk m1 "$HK/_tasks/t1.md" "## 2026-01-01T00:00:00Z-aaaa open s:1"
 mk m3 "$HK/CORE.md" "bob knows"
-on m1 sync --quiet; ok "hub: first member syncs" $? 0
+mk m1 "$HK/superseded/old.md" "old"; mk m1 "$HK/imported/claude-code/MEMORY.md" "imp"; mk m1 "$HK/SESSION.archive.2026-09.md" "arc"
+r=$(on m1 sync); ok "hub: first member syncs" $? 0
+case "$r" in *"another machine"*) x=y ;; *) x=n ;; esac; ok "hub: a first sync does not report the machine's own tasks" $x n
+ok "hub: what the layout does not name stays on the machine" "$(git -C "$HB" ls-tree -r --name-only main | grep -cE 'superseded|imported|SESSION'):$(exists m1 "$HK/superseded/old.md")" "0:0"
 on m3 sync --quiet; ok "hub: second member syncs" $? 0
 ok "hub: files go under the member's login" "$(git -C "$HB" show "main:$HK/@alice/CORE.md"):$(git -C "$HB" show "main:$HK/@bob/CORE.md")" "alice knows:bob knows"
 ok "hub: identity is namespaced too" "$(git -C "$HB" show main:identity/@alice/IDENTITY.md)" alice

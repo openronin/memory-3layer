@@ -48,6 +48,7 @@ NET_WHY=""
 NET_REMOTE=""
 declare -A SKIPPED=()
 ARRIVED=()
+FIRST_ARRIVED=""
 # This member's login when the storage being synced is a memory hub (docs/hub.md), else empty.
 HUB_LOGIN=""
 HUB_SHARED=0
@@ -176,6 +177,26 @@ path_key() {
 # In a hub a member's files sit under @<login>. The data directory has no such level:
 # it holds one person's memory, so the two differ only by this mapping.
 
+hub_local() {
+  # hub_local <path in the data dir>: what a hub's layout does not name and so stays on
+  # the machine: routing, losing copies of a conflict, what was imported from a harness,
+  # and the older SESSION.md format.
+  [[ -n "$HUB_LOGIN" ]] || return 1
+  case "$1" in
+    routing.conf|projects/*/superseded/*|projects/*/imported/*) return 0 ;;
+    projects/*/_tasks/*) return 1 ;;
+    projects/*/SESSION.md|projects/*/SESSION.*.md) return 0 ;;
+  esac
+  return 1
+}
+
+lose() {
+  # lose <file> <path in the data dir> <whose version it is>: keeps the losing version of
+  # a conflict next to the file. With a hub it stays on this machine.
+  local l; l=$(loser_path "$2" "$3")
+  if [[ -n "$HUB_LOGIN" ]]; then put "$1" "$DATA/$l"; else put "$1" "$CLONE/$l"; fi
+}
+
 to_clone() {
   # to_clone <path in the data dir>: where it is in the clone.
   local p=$1 k
@@ -189,7 +210,13 @@ to_clone() {
 
 from_clone() {
   # from_clone <path in the clone>: where it is in the data dir. Nothing for what is not
-  # this member's memory: another member's namespace, the hub's own files.
+  # this member's memory: another member's namespace, the hub's own files, and what an
+  # earlier client sent that stays on the machine now.
+  local p; p=$(clone_path "$1")
+  hub_local "$p" || printf '%s' "$p"
+}
+
+clone_path() {
   local c=$1 rest key tail
   [[ -n "$HUB_LOGIN" ]] || { printf '%s' "$c"; return; }
   case "$c" in
@@ -341,6 +368,7 @@ routed_files() {
   while IFS= read -r p; do
     p=${p#"$DATA"/}
     case "$p" in *.template.md|*.tmp|aliases.tsv|.*) continue ;; esac
+    hub_local "$p" && continue
     [[ "$(route_path "$p")" == "$addr" ]] && printf '%s\n' "$p"
   done < <(find "$DATA" -type f | sort)
   return 0
@@ -422,10 +450,9 @@ remote_ref() {
 copy_out() {
   # Data dir -> clone. On the first sync the two have no common history, so a file
   # that differs follows the conflict rule instead of silently replacing the remote.
-  local addr=$1 first=$2 p f c loser
+  local addr=$1 first=$2 p f c
   while IFS= read -r p; do
-    # Routing is local, and a path that belongs to one machine stays out of a shared hub.
-    [[ -n "$HUB_LOGIN" && "$p" == routing.conf ]] && continue
+    # A path that belongs to one machine stays out of a shared hub.
     [[ $HUB_SHARED -eq 1 && "$p" == projects/local/* ]] && continue
     f="$DATA/$p"; c="$CLONE/$(to_clone "$p")"
     [[ -f "$c" ]] && cmp -s "$f" "$c" && continue
@@ -439,15 +466,20 @@ copy_out() {
       continue
     fi
     if [[ "$first" == 1 && -f "$c" ]]; then
-      loser=$(loser_path "$p" "$HOST")
       if theirs_is_newer "$f" "$c" "$(mtime "$f")" "$(mtime "$c")"; then
-        put "$f" "$CLONE/$(to_clone "$loser")"
+        lose "$f" "$p" "$HOST"
         continue
       fi
-      put "$c" "$CLONE/$(to_clone "$(loser_path "$p" remote)")"
+      lose "$c" "$p" remote
     fi
     put "$f" "$c"
   done < <(routed_files "$addr")
+  # What an earlier client sent to the hub and the layout does not name.
+  if [[ -n "$HUB_LOGIN" ]]; then
+    while IFS= read -r c; do
+      hub_local "$(clone_path "$c")" && rm -f "$CLONE/$c"
+    done < <(git -C "$CLONE" ls-files "projects/*/@$HUB_LOGIN/*")
+  fi
   return 0
 }
 
@@ -569,12 +601,10 @@ resolve_conflicts() {
       # Lists that members only add lines to.
       awk '!seen[$0]++' "$ours" "$theirs" > "$CLONE/$p"
     elif theirs_is_newer "$ours" "$theirs" "$(g log -1 --format=%ct HEAD -- "$p")" "$(g log -1 --format=%ct "origin/$BRANCH" -- "$p")"; then
-      mkdir -p "$(dirname "$CLONE/$(loser_path "$p" "$HOST")")"
-      cp "$ours" "$CLONE/$(loser_path "$p" "$HOST")"
+      d=$(from_clone "$p"); [[ -z "$d" ]] || lose "$ours" "$d" "$HOST"
       cp "$theirs" "$CLONE/$p"
     else
-      mkdir -p "$(dirname "$CLONE/$(loser_path "$p" "$from")")"
-      cp "$theirs" "$CLONE/$(loser_path "$p" "$from")"
+      d=$(from_clone "$p"); [[ -z "$d" ]] || lose "$theirs" "$d" "$from"
       cp "$ours" "$CLONE/$p"
     fi
   done < <(g diff --name-only --diff-filter=U)
@@ -645,6 +675,19 @@ copy_in() {
   return 0
 }
 
+first_arrivals() {
+  # At the first sync with a storage there is no commit to compare with: what arrives is
+  # what the storage holds and this machine does not. Asked before anything is copied.
+  local c p
+  FIRST_ARRIVED=""
+  remote_ref || return 0
+  while IFS= read -r c; do
+    p=$(from_clone "$c")
+    [[ -n "$p" && ! -e "$DATA/$p" ]] && FIRST_ARRIVED+="A"$'\t'"$c"$'\n'
+  done < <(git -C "$CLONE" ls-tree -r --name-only "origin/$BRANCH")
+  return 0
+}
+
 note_arrivals() {
   # note_arrivals <addr> <commit before the merge>: tasks the merge brought from another
   # machine. They go to $STATE/arrived, and the client tells the session on that project:
@@ -666,7 +709,7 @@ note_arrivals() {
     mkdir -p "$STATE"
     printf '%s\t%s\t%s\n' "$rest" "${p%.md}" "$kind" >> "$STATE/arrived"
   done < <(if [[ -n "$pre" ]]; then git -C "$CLONE" diff --name-status --no-renames --diff-filter=AM "$pre" HEAD
-           else git -C "$CLONE" ls-files | sed 's/^/A\t/'; fi)
+           else printf '%s' "$FIRST_ARRIVED"; fi)
 }
 
 write_state() {
@@ -746,6 +789,7 @@ sync_store() {
   [[ -n "$base" ]] || first=1
   SKIPPED=()
   contact_row
+  [[ -n "$base" ]] || first_arrivals
   drop_stale_journals "$ADDR"
   copy_out "$ADDR" "$first"
   remove_deleted "$ADDR"

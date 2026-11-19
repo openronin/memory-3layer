@@ -27,6 +27,8 @@ A hub is optional. Without one, memory is a plain directory on the machine, as i
 
 This directory holds only the user's own memory and has no namespaces. The `@<login>/` level exists only in a hub: sync maps `projects/<key>/<file>` to `projects/<key>/@<login>/<file>` in the hub's clone, and back. The clone stays transport, kept apart from the data directory. Other members' memory is read from the clone and is never copied into the data directory.
 
+The client sends a hub only what the layout below names. The rest stays on the machine: `routing.conf`, `superseded/` (the losing copy of a conflict, files from before a format change), `imported/` (what was copied from a harness's own memory), and `SESSION.md` with its archives. A project still on `SESSION.md` is moved to `CORE.md` before it is kept in a hub. The client removes from its own namespace such files that an earlier version sent.
+
 So connecting a hub, or leaving one, moves no local file.
 
 ## Names
