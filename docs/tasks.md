@@ -79,6 +79,8 @@ So a task gets a `checkpoint` record: the state of the whole task, written by th
 
 Only the latest checkpoint is shown, so a later one written as a report on the last stretch hides the whole state an earlier one held. This happened on the same task within a day: a 6 KB state with the deploy commands and the production rules, then two 1.4 KB run reports. So a checkpoint under half the size of the one that holds the state does not replace it: `task show` prints the state checkpoint first and the latest smaller one after it, and the write says so. A checkpoint of at least half the size replaces both. Nothing is refused.
 
+A checkpoint may be written before it is due. Agents do so when a task is handed over (a stage is done, the user ends the session, a deploy went out), and that is a good moment for one, as long as it is the whole state.
+
 When the records after the last checkpoint pass `TASK_CHECKPOINT_BYTES`, 40000 by default and `0` for never, the index marks the task `checkpoint due`, and `task log` and `task show` ask for one on every call. Nothing is refused: a refused record is a lost record. The pre-compaction reminder asks too, since that is the last moment the agent still has the whole context.
 
 Records stay in the journal. Moving the older ones out would need a rule for sync, where another machine's copy brings them back, and the file's size has shown no cost.
