@@ -5,12 +5,18 @@
 # Values live in one mode-600 file per secret, outside any synced directory.
 # No command prints a value to a pipe; agents use `run`, humans can use `get`.
 # Files are protected by permissions only: they are not encrypted at rest.
+#
+# A secret is the user's (L0, $STORE/<name>) or a project's (L1,
+# $STORE/.projects/<key>/<name>); a reference looks in the project first. With
+# `sync on <address>` sync keeps gpg-encrypted copies in that storage (docs/sync.md):
+# the password is in $STORE/.sync/ and never leaves the machine.
 
 set -u
 
 STORE="${MEMORY_3LAYER_SECRETS:-${XDG_DATA_HOME:-$HOME/.local/share}/memory-3layer-secrets}"
 MEMORY_HOME="${MEMORY_3LAYER_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/memory-3layer}"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
+PKEY="${MEMORY_3LAYER_PROJECT_KEY:-}"
 IGNORE_MARK='secret-scan:ignore'
 
 die() { printf 'memory-secrets: %s\n' "$*" >&2; exit 2; }
@@ -55,9 +61,69 @@ read_file_value() {
 }
 
 store_value() {
-  # store_value <name> <value>: a new file is created mode 600 by the umask.
+  # store_value <file> <value>: a new file is created mode 600 by the umask.
   ensure_store
-  ( umask 077; printf '%s' "$2" > "$STORE/$1.tmp" && mv "$STORE/$1.tmp" "$STORE/$1" ) || die "cannot write '$1'"
+  ( umask 077; mkdir -p "${1%/*}" && printf '%s' "$2" > "$1.tmp" && mv "$1.tmp" "$1" ) || die "cannot write '${1##*/}'"
+}
+
+project_dir() {
+  [[ -n "$PKEY" ]] || die "no project here: run it inside the project, or set MEMORY_3LAYER_KEY"
+  printf '%s/.projects/%s' "$STORE" "$PKEY"
+}
+
+locate() {
+  # locate <name>: the file behind secret://<name>. The project's own secret comes first.
+  if [[ -n "$PKEY" && -f "$STORE/.projects/$PKEY/$1" ]]; then printf '%s' "$STORE/.projects/$PKEY/$1"
+  elif [[ -f "$STORE/$1" ]]; then printf '%s' "$STORE/$1"
+  else return 1
+  fi
+}
+
+take_project_flag() {
+  # Sets LEVEL_DIR to the project's directory when --project is among the arguments,
+  # to the store otherwise, and ARGS to the rest.
+  local a; ARGS=(); LEVEL_DIR=$STORE
+  for a in "$@"; do
+    if [[ "$a" == --project ]]; then LEVEL_DIR=$(project_dir) || exit 2; else ARGS+=("$a"); fi
+  done
+}
+
+sealed_copy() {
+  # sealed_copy <secret file>: its encrypted copy in the data directory, where sync puts it.
+  local f=$1 name=${1##*/}
+  case "$f" in
+    "$STORE"/.projects/*) f=${f#"$STORE"/.projects/}; printf '%s/projects/%s/_secrets/%s.gpg' "$MEMORY_HOME" "${f%/*}" "$name" ;;
+    *) printf '%s/identity/_secrets/%s.gpg' "$MEMORY_HOME" "$name" ;;
+  esac
+}
+
+cmd_sync() {
+  # sync on <address> [--from-file <path>[:<line>]] | off <address> | status
+  local sub=${1:-status} addr=${2:-} id v f
+  case "$sub" in
+    on|off)
+      [[ -n "$addr" ]] || die "usage: sync on <address> [--from-file <path>[:<line>]] | off <address> | status"
+      id=$(printf '%s' "$addr" | cksum | cut -d' ' -f1)
+      if [[ "$sub" == off ]]; then
+        rm -f "$STORE/.sync/$id" "$STORE/.sync/$id.ok" "$STORE/.sync/$id.addr"
+        printf 'secrets are no longer synced with %s. The encrypted copies already there stay.\n' "$addr"
+        return 0
+      fi
+      command -v gpg >/dev/null 2>&1 || die "gpg is not installed: it encrypts the copies"
+      if [[ $# -eq 4 && "$3" == --from-file ]]; then v=$(read_file_value "$4") || exit 2
+      elif [[ $# -eq 2 ]]; then v=$(read_value) || exit 2
+      else die "usage: sync on <address> [--from-file <path>[:<line>]]"
+      fi
+      [[ "$v" != *$'\n'* ]] || die "the password is one line"
+      store_value "$STORE/.sync/$id" "$v"
+      store_value "$STORE/.sync/$id.addr" "$addr"
+      rm -f "$STORE/.sync/$id.ok"
+      printf 'secrets routed to %s are synced from the next sync, encrypted with this password. On another machine give the same one.\n' "$addr" ;;
+    status)
+      for f in "$STORE"/.sync/*.addr; do [[ -f "$f" ]] && printf '%s\n' "$(cat "$f")"; done
+      return 0 ;;
+    *) die "usage: sync on <address> [--from-file <path>[:<line>]] | off <address> | status" ;;
+  esac
 }
 
 # --- detection ---------------------------------------------------------------
@@ -172,7 +238,7 @@ cmd_adopt() {
   done < <(scan_text < "$f")
   [[ -n "$val" ]] || die "no finding at $f:$want"
   [[ -e "$STORE/$name" ]] && [[ "$(cat "$STORE/$name")" != "$val" ]] && die "'$name' already holds a different value"
-  store_value "$name" "$val"
+  store_value "$STORE/$name" "$val"
   local tmp; tmp=$(mktemp "$f.XXXXXX") || die "cannot create a temp file next to $f"
   V="$val" R="secret://$name" awk 'BEGIN{v=ENVIRON["V"];r=ENVIRON["R"]}
     {o="";s=$0;while((i=index(s,v))>0){o=o substr(s,1,i-1) r;s=substr(s,i+length(v))};print o s}' "$f" > "$tmp" \
@@ -309,15 +375,15 @@ print(t); print(real); print(1 if inside else 0); sys.stdout.write(text)
 
 cmd_run() {
   # run VAR=name [VAR=name...] -- command: expose secrets only to that process.
-  local a var name
+  local a var name f
   while [[ $# -gt 0 && "$1" != "--" ]]; do
     a=$1; shift
     [[ "$a" == *=* ]] || die "expected VAR=name, got '$a'"
     var=${a%%=*}; name=${a#*=}
     [[ "$var" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "bad variable '$var'"
     valid_name "$name"
-    [[ -f "$STORE/$name" ]] || die "no secret '$name' on this machine"
-    export "$var=$(cat "$STORE/$name")"
+    f=$(locate "$name") || die "no secret '$name' on this machine"
+    export "$var=$(cat "$f")"
   done
   [[ $# -ge 2 ]] || die "usage: run VAR=name... -- command [args]"
   shift
@@ -328,11 +394,14 @@ usage() {
   cat <<'USAGE'
 memory-secrets.sh — local secret store; memory holds secret://<name> references only
 
-  put <name>                 store a value from stdin or a hidden prompt
+  put <name> [--project]     store a value from stdin or a hidden prompt; --project: for
+                             this project only, else the user's own
   put <name> --from-file <path>[:<line>]  the value is that file, or that line of it
   list                       names on this machine, never values
   has <name>                 exit 0 if the secret exists here
-  rm <name>                  delete a secret
+  rm <name> [--project]      delete a secret
+  sync on <address>          keep encrypted copies in that storage; asks for a password
+  sync off <address> | sync status
   run VAR=name... -- cmd     run cmd with the secrets in its environment
   get <name>                 print a value to a terminal; refused in a pipe
   scan [path...]             report file:line and kind, exit 1 if anything is found
@@ -344,19 +413,32 @@ USAGE
 cmd=${1:-}; [[ $# -gt 0 ]] && shift
 case "$cmd" in
   put)
-    [[ $# -eq 1 || ( $# -eq 3 && "$2" == --from-file ) ]] || die "usage: put <name> [--from-file <path>[:<line>]]"
+    take_project_flag "$@"; set -- ${ARGS[@]+"${ARGS[@]}"}
+    [[ $# -eq 1 || ( $# -eq 3 && "$2" == --from-file ) ]] || die "usage: put <name> [--project] [--from-file <path>[:<line>]]"
     valid_name "$1"
     if [[ $# -eq 3 ]]; then v=$(read_file_value "$3") || exit 2; else v=$(read_value) || exit 2; fi
-    store_value "$1" "$v"; printf 'stored secret://%s\n' "$1" ;;
-  list) for f in "$STORE"/*; do [[ -f "$f" && "$f" != *.tmp ]] && printf '%s\n' "${f##*/}"; done; exit 0 ;;
-  has) [[ $# -eq 1 ]] || die "usage: has <name>"; valid_name "$1"; [[ -f "$STORE/$1" ]] ;;
-  rm) [[ $# -eq 1 ]] || die "usage: rm <name>"; valid_name "$1"; rm -- "$STORE/$1" 2>/dev/null || die "no secret '$1'" ;;
+    store_value "$LEVEL_DIR/$1" "$v"
+    if [[ "$LEVEL_DIR" == "$STORE" ]]; then printf 'stored secret://%s\n' "$1"; else printf 'stored secret://%s for the project %s\n' "$1" "$PKEY"; fi ;;
+  list)
+    for f in "$STORE"/*; do [[ -f "$f" && "$f" != *.tmp ]] && printf '%s\n' "${f##*/}"; done
+    if [[ -n "$PKEY" ]]; then
+      for f in "$STORE/.projects/$PKEY"/*; do [[ -f "$f" && "$f" != *.tmp ]] && printf '%s (project)\n' "${f##*/}"; done
+    fi
+    exit 0 ;;
+  has) [[ $# -eq 1 ]] || die "usage: has <name>"; valid_name "$1"; locate "$1" >/dev/null ;;
+  rm)
+    take_project_flag "$@"; set -- ${ARGS[@]+"${ARGS[@]}"}
+    [[ $# -eq 1 ]] || die "usage: rm <name> [--project]"; valid_name "$1"
+    rm -- "$LEVEL_DIR/$1" 2>/dev/null || die "no secret '$1'"
+    # Its encrypted copy goes too, and the next sync removes it from the storage.
+    rm -f "$(sealed_copy "$LEVEL_DIR/$1")" ;;
   run) cmd_run "$@" ;;
   get)
     [[ $# -eq 1 ]] || die "usage: get <name>"; valid_name "$1"
     [[ -t 1 ]] || die "get prints to a terminal only; use: run VAR=$1 -- command"
-    [[ -f "$STORE/$1" ]] || die "no secret '$1' on this machine"
-    cat "$STORE/$1"; echo ;;
+    f=$(locate "$1") || die "no secret '$1' on this machine"
+    cat "$f"; echo ;;
+  sync) cmd_sync "$@" ;;
   scan) cmd_scan "$@" ;;
   adopt) cmd_adopt "$@" ;;
   guard) cmd_guard ;;

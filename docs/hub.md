@@ -54,6 +54,8 @@ A key of the form `local/<path>` belongs to one machine. The client does not sen
       _tasks/<slug>.md                    open task journals
       _tasks/<slug>.files/                files a task needs beyond a session
       _tasks/archive/YYYY-MM/<slug>.md    closed journals, with their .files/
+      _secrets/<name>.gpg                 the project's secrets, encrypted on the client
+    identity/@<login>/_secrets/<name>.gpg the member's own secrets, the same way
 
 - The branch is `main`. Nothing else is pushed.
 - The tree holds regular files only: no symlinks and no submodules.
@@ -103,7 +105,9 @@ The client only appends to a journal, with two exceptions: `task redact` rewrite
 
 **aliases.tsv.** One rename per line, `<old key><TAB><new key>`. Members add lines, and two versions merge as the union of their lines.
 
-**Secrets.** No file in a hub holds a secret value, only `secret://<name>`. The client scans what it sends.
+**Secrets.** No file in a hub holds a secret value in the clear, only `secret://<name>`. The client scans what it sends.
+
+**_secrets/<name>.gpg.** Optional, written only when the member turned it on for this hub. One secret per file: an ASCII-armored OpenPGP message, encrypted with a password that stays on the member's machines (`gpg --symmetric`, AES-256). Only that member can read it: other members and the service see the name and the ciphertext. A service keeps these files as they are and does not index them. Sharing a secret with the team is not in contract 1.
 
 ## Writing
 
@@ -184,7 +188,7 @@ Moving a project into a team hub publishes its whole memory to the team, old jou
 
 ## Open
 
-- **Secrets between machines.** Not in contract 1. A new machine gets `secret://` references with no values behind them. A likely shape: values encrypted on the client, the hub storing only ciphertext.
+- **Secrets shared by a team.** A member's `_secrets/` is readable by that member only. A secret the whole team uses is still passed outside the hub.
 - **Shared knowledge.** With a namespace per member, each agent learns the same pitfalls on its own, and search is the only bridge. A team-wide `CORE.md` would need a merge rule that one writer per namespace avoids.
 - **Access narrower than the hub.** Contract 1 has none: a second hub is the answer.
 - **Letter case in a key.** `github.com/Owner/Repo` and `github.com/owner/repo` are two keys. Two members whose remotes differ in case get two project directories, and only `aliases.tsv` joins them.

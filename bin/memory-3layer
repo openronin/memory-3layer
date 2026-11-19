@@ -573,6 +573,10 @@ cmd_rekey() {
   [[ "$(follow_redirect "$new")" != "$old" ]] || die "'$new' already redirects to '$old'"
   remember_alias "$old" "$new"
   res=$(move_tree "$HOME_DIR/projects/$old" "$HOME_DIR/projects/$new" "${old//\//_}")
+  # The project's own secrets follow it.
+  if [[ -d "$SECRETS_DIR/.projects/$old" && ! -e "$SECRETS_DIR/.projects/$new" ]]; then
+    mkdir -p "$SECRETS_DIR/.projects/${new%/*}" && mv "$SECRETS_DIR/.projects/$old" "$SECRETS_DIR/.projects/$new"
+  fi
   printf '%s -> %s: %s\n' "$old" "$new" "$res"
 }
 
@@ -857,7 +861,7 @@ case "$cmd" in
   search) cmd_search "$@" ;;
   refresh) cmd_refresh "$@" ;;
   guard) MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" exec bash "$SELF_DIR/memory-secrets.sh" guard ;;
-  secret) MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" exec bash "$SELF_DIR/memory-secrets.sh" "$@" ;;
+  secret) MEMORY_3LAYER_PROJECT_KEY="$(project_key 2>/dev/null)" MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" exec bash "$SELF_DIR/memory-secrets.sh" "$@" ;;
   ''|-h|--help|help) usage ;;
   *) usage >&2; exit 2 ;;
 esac

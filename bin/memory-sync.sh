@@ -29,6 +29,7 @@ CONFIG_DIR="${MEMORY_3LAYER_CONFIG_DIR:?}"
 LOCAL_CONF="$CONFIG_DIR/storage.conf"
 ROUTING_CONF="$DATA/routing.conf"
 STORES="$STATE/stores"
+SECRETS="${MEMORY_3LAYER_SECRETS:-${XDG_DATA_HOME:-$HOME/.local/share}/memory-3layer-secrets}"
 HOST=$(hostname -s 2>/dev/null || echo unknown)
 
 MODE=full
@@ -150,6 +151,7 @@ route_path() {
   case "$p" in
     */_tasks/archive/*) route "${p%%/_tasks/*}" archive; return ;;
     */_tasks/*) route "${p%%/_tasks/*}" session; return ;;
+    */_secrets/*) key=${p%%/_secrets/*} ;;
     */imported/*) key=${p%%/imported/*} ;;
     */superseded/*) key=${p%%/superseded/*} ;;
     *) key=${p%/*} ;;
@@ -167,6 +169,7 @@ path_key() {
   local p=${1#projects/}
   case "$p" in
     */_tasks/*) printf '%s' "${p%%/_tasks/*}" ;;
+    */_secrets/*) printf '%s' "${p%%/_secrets/*}" ;;
     */imported/*) printf '%s' "${p%%/imported/*}" ;;
     */superseded/*) printf '%s' "${p%%/superseded/*}" ;;
     *) printf '%s' "${p%/*}" ;;
@@ -183,7 +186,7 @@ hub_local() {
   # and the older SESSION.md format.
   [[ -n "$HUB_LOGIN" ]] || return 1
   case "$1" in
-    routing.conf|projects/*/superseded/*|projects/*/imported/*) return 0 ;;
+    routing.conf|projects/*/superseded/*|projects/*/imported/*|identity/*superseded/*) return 0 ;;
     projects/*/_tasks/*) return 1 ;;
     projects/*/SESSION.md|projects/*/SESSION.*.md) return 0 ;;
   esac
@@ -244,7 +247,7 @@ hub_mode() {
   if git -C "$CLONE" rev-parse -q --verify "origin/$BRANCH" >/dev/null 2>&1; then
     has=$(git -C "$CLONE" show "origin/$BRANCH:README.md" 2>/dev/null | readme_header contract)
   else
-    has=$(readme_header contract < "$CLONE/README.md" 2>/dev/null)
+    has=$({ readme_header contract < "$CLONE/README.md"; } 2>/dev/null)
   fi
   [[ -n "$has" ]] || return 0
   if [[ "$has" != "$CONTRACT" ]]; then
@@ -376,6 +379,131 @@ routed_files() {
     hub_local "$p" && continue
     [[ "$(route_path "$p")" == "$addr" ]] && printf '%s\n' "$p"
   done < <(find "$DATA" -type f | sort)
+  return 0
+}
+
+# --- secrets ------------------------------------------------------------------
+# A storage the user gave a password for (`secret sync on <address>`) also keeps the
+# secrets routed to it, each as a gpg-encrypted file: identity/_secrets/<name>.gpg for
+# the user's own, projects/<key>/_secrets/<name>.gpg for a project's. The encrypted
+# copy lies in the data directory and travels like any other file. A copy and its
+# secret carry the same mtime, and the newer of the two is the one that changed.
+
+seal_pass() {
+  local f; f="$SECRETS/.sync/$(store_id "$1")"
+  [[ -f "$f" ]] && printf '%s' "$f"
+}
+
+seal_gpg() {
+  # seal_gpg <password file> <gpg arguments>. Its own home keeps the user's gpg out of it.
+  local pw=$1; shift
+  ( umask 077; mkdir -p "$SECRETS/.sync/gnupg" )
+  gpg --homedir "$SECRETS/.sync/gnupg" --batch --yes --quiet --no-tty --pinentry-mode loopback \
+    --no-symkey-cache --passphrase-file "$pw" "$@" 2>/dev/null
+}
+
+secret_of() {
+  # secret_of <path of an encrypted copy in the data dir>: the secret's file in the store.
+  local p=$1 n
+  n=${p##*/}; n=${n%.gpg}
+  case "$p" in
+    identity/_secrets/*) printf '%s/%s' "$SECRETS" "$n" ;;
+    *) p=${p#projects/}; printf '%s/.projects/%s/%s' "$SECRETS" "${p%%/_secrets/*}" "$n" ;;
+  esac
+}
+
+sealed_files() {
+  # Encrypted copies in the data dir that this storage holds.
+  local addr=$1 p
+  while IFS= read -r p; do
+    p=${p#"$DATA"/}
+    [[ "${p%/*}" == */_secrets && "$(route_path "$p")" == "$addr" ]] && printf '%s\n' "$p"
+  done < <(find "$DATA/identity" "$DATA/projects" -type f -path '*/_secrets/*.gpg' 2>/dev/null | sort)
+  return 0
+}
+
+secret_files() {
+  # Secrets on this machine that go to this storage, as the paths of their copies.
+  local addr=$1 f p
+  {
+    for f in "$SECRETS"/*; do
+      [[ -f "$f" && "$f" != *.tmp ]] && printf 'identity/_secrets/%s.gpg\n' "${f##*/}"
+    done
+    [[ -d "$SECRETS/.projects" ]] && find "$SECRETS/.projects" -type f ! -name '*.tmp' | sort | while IFS= read -r f; do
+      f=${f#"$SECRETS"/.projects/}; printf 'projects/%s/_secrets/%s.gpg\n' "${f%/*}" "${f##*/}"
+    done
+  } | while IFS= read -r p; do
+    [[ "$(route_path "$p")" == "$addr" ]] && printf '%s\n' "$p"
+  done
+  return 0
+}
+
+secrets_out() {
+  # Encrypts what changed here since its copy was made. Nothing is done with a password
+  # that does not open the copies already there: two passwords in one storage would
+  # leave each machine with secrets it can't read.
+  local addr=$1 pw p t f
+  SEAL_BAD=0
+  pw=$(seal_pass "$addr") || return 0
+  command -v gpg >/dev/null 2>&1 || return 0
+  if [[ ! -f "$pw.ok" ]]; then
+    t=$(sealed_files "$addr" | head -n1)
+    if [[ -n "$t" ]] && ! seal_gpg "$pw" --decrypt "$DATA/$t" >/dev/null; then SEAL_BAD=1; return 0; fi
+    : > "$pw.ok"
+  fi
+  while IFS= read -r p; do
+    t="$DATA/$p"; f=$(secret_of "$p")
+    if [[ -f "$t" ]]; then
+      [[ "$f" -nt "$t" ]] || continue
+    elif grep -qxF "$p" "$pw.have" 2>/dev/null && [[ ! "$f" -nt "$pw.have" ]]; then
+      # Its copy was here at the last sync and is gone: secrets_in removes the secret.
+      continue
+    fi
+    mkdir -p "${t%/*}"
+    if seal_gpg "$pw" --symmetric --cipher-algo AES256 --s2k-mode 3 --s2k-digest-algo SHA512 \
+         --s2k-count 65011712 --armor --output "$t.tmp" "$f"; then
+      mv -f "$t.tmp" "$t" && touch -r "$f" "$t"
+    else
+      rm -f "$t.tmp"
+    fi
+  done < <(secret_files "$addr")
+  return 0
+}
+
+secrets_in() {
+  # Decrypts the copies that arrived or changed, and removes a secret whose copy another
+  # machine deleted.
+  local addr=$1 pw p t f waiting=0
+  pw=$(seal_pass "$addr") || pw=""
+  if [[ -n "$pw" ]] && ! command -v gpg >/dev/null 2>&1; then
+    printf '%s: gpg is not installed, secrets are not synced\n' "$addr" >&2; return 0
+  fi
+  while IFS= read -r p; do
+    [[ -n "$pw" ]] || { waiting=$((waiting + 1)); continue; }
+    [[ $SEAL_BAD -eq 0 ]] || break
+    t="$DATA/$p"; f=$(secret_of "$p")
+    [[ -f "$f" && ! "$t" -nt "$f" ]] && continue
+    if ( umask 077; mkdir -p "${f%/*}" && seal_gpg "$pw" --decrypt --output "$f.tmp" "$t" ); then
+      mv -f "$f.tmp" "$f" && touch -r "$t" "$f"; : > "$pw.ok"
+    else
+      rm -f "$f.tmp"; SEAL_BAD=1
+    fi
+  done < <(sealed_files "$addr")
+  if [[ -z "$pw" ]]; then
+    [[ $waiting -eq 0 ]] || say "$addr: $waiting encrypted secrets are kept there. To use them on this machine: memory-3layer secret sync on $addr"
+    return 0
+  fi
+  if [[ $SEAL_BAD -eq 1 ]]; then
+    printf '%s: the password given for secrets does not open the ones kept there, secrets are not synced. Give the one used on the other machine: memory-3layer secret sync on %s\n' "$addr" "$addr" >&2
+    return 0
+  fi
+  while IFS= read -r p; do
+    [[ -n "$p" && ! -f "$DATA/$p" ]] || continue
+    f=$(secret_of "$p")
+    [[ -f "$f" && ! "$f" -nt "$pw.have" ]] || continue
+    rm -f "$f"; f=${p##*/}; say "$addr: secret ${f%.gpg} was deleted on another machine, removed here"
+  done < <(cat "$pw.have" 2>/dev/null)
+  sealed_files "$addr" > "$pw.have.tmp" && mv -f "$pw.have.tmp" "$pw.have"
   return 0
 }
 
@@ -723,7 +851,7 @@ write_state() {
 }
 
 sync_store() {
-  local ADDR=$1 CLONE BRANCH base pre first=0 lock
+  local ADDR=$1 CLONE BRANCH base pre first=0 lock SEAL_BAD=0
   HUB_LOGIN=""; HUB_SHARED=0
   local id; id=$(store_id "$ADDR")
   CLONE="$STORES/$id"
@@ -796,6 +924,8 @@ sync_store() {
   contact_row
   [[ -n "$base" ]] || first_arrivals
   drop_stale_journals "$ADDR"
+  # Not at the first sync: the password is checked against what the storage already holds.
+  [[ -z "$base" ]] || secrets_out "$ADDR"
   copy_out "$ADDR" "$first"
   remove_deleted "$ADDR"
   write_aliases "$ADDR"
@@ -839,6 +969,7 @@ sync_store() {
       fi
     fi
   fi
+  secrets_in "$ADDR"
   git -C "$CLONE" rev-parse -q --verify HEAD > "$CLONE.base" 2>/dev/null
   rm -f "$CLONE.refused"
   write_seen "$ADDR"

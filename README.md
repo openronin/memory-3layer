@@ -37,7 +37,7 @@ Hooks do the mechanical part:
 | Before compaction | Remind the agent to save its state, push in the background |
 | Session end | Push in the background |
 
-Secret values never enter memory. Memory holds `secret://<name>`, and the value stays in `~/.local/share/memory-3layer-secrets` on that machine, protected by file permissions, not encrypted.
+Secret values never enter memory. Memory holds `secret://<name>`, and the value stays in `~/.local/share/memory-3layer-secrets` on that machine, protected by file permissions, not encrypted. A storage can keep encrypted copies for your other machines: `memory-3layer secret sync on <address>`, see `docs/sync.md`.
 
 The full rules the agent follows are in [CLAUDE.md](CLAUDE.md).
 

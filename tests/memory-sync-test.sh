@@ -536,5 +536,45 @@ case "$(stamp_time)" in "$before") r=n ;; *) r=y ;; esac; ok "tick: runs anyway 
 ok "tick: prints nothing" "$(on ta sync tick 2>&1)" ""
 sleep 0.3; waitsync ta
 
+# --- secrets travel encrypted ---
+if command -v gpg >/dev/null; then
+  mkdir -p "$T/s1" "$T/s2"
+  # The identity storage is a plain repository, the project's is a hub.
+  SS=$(bare sec); SP=$(bare secproj); KS=github.com/o/sec
+  git clone -q "$SP" "$T/secclone" 2>/dev/null; on s1 hub init "$T/secclone" >/dev/null; git -C "$T/secclone" push -q origin main
+  for m in s1 s2; do
+    mkdir -p "$(dirname "$(conf $m)")"
+    printf 'default = none\nidentity = %s\n\n[project %s]\ndefault = %s\n\n[storage %s]\nlogin = alice\n' "$SS" "$KS" "$SP" "$SP" > "$(conf $m)"
+  done
+  sec() { local m=$1; shift; HOME="$T/$m" MEMORY_3LAYER_KEY=$KS bash "$BIN" secret "$@"; }
+  val() { cat "$T/$1/.local/share/memory-3layer-secrets/$2" 2>/dev/null; }
+  mk s1 identity/IDENTITY.md "me"; mk s1 "projects/$KS/CORE.md" "core"
+  on s1 sync --quiet
+  printf 'user-value' | sec s1 put mine >/dev/null
+  printf 'proj-value' | sec s1 put api --project >/dev/null
+  ok "secrets: a project's secret comes before the user's" "$(printf 'x' | sec s1 put api >/dev/null; sec s1 run V=api -- sh -c 'printf %s "$V"'; sec s1 rm api)" proj-value
+  on s1 sync --quiet
+  ok "secrets: nothing is sent without a password" "$(git -C "$SS" ls-tree -r --name-only main | grep -c _secrets)" 0
+  printf 'pass one' | sec s1 sync on "$SS" >/dev/null; printf 'pass two' | sec s1 sync on "$SP" >/dev/null
+  on s1 sync --quiet
+  ok "secrets: the user's goes to the identity storage" "$(git -C "$SS" ls-tree -r --name-only main | grep _secrets)" "identity/_secrets/mine.gpg"
+  ok "secrets: the project's goes to its storage" "$(git -C "$SP" ls-tree -r --name-only main | grep _secrets)" "projects/$KS/@alice/_secrets/api.gpg"
+  ok "secrets: the storage holds no value" "$(git -C "$SS" show main:identity/_secrets/mine.gpg | grep -c user-value)" 0
+  h=$(git -C "$SS" rev-parse main); on s1 sync --quiet
+  ok "secrets: an unchanged secret is not sent again" "$(git -C "$SS" rev-parse main)" "$h"
+  case "$(on s2 sync 2>&1)" in *"secret sync on $SS"*) r=y ;; *) r=n ;; esac; ok "secrets: a new machine is told to give the password" $r y
+  printf 'wrong' | sec s2 sync on "$SS" >/dev/null
+  case "$(on s2 sync 2>&1)" in *"does not open"*) r=y ;; *) r=n ;; esac; ok "secrets: a wrong password is reported" $r y
+  printf 'pass one' | sec s2 sync on "$SS" >/dev/null; printf 'pass two' | sec s2 sync on "$SP" >/dev/null
+  on s2 sync --quiet
+  ok "secrets: the user's secret arrives" "$(val s2 mine)" user-value
+  ok "secrets: the project's secret arrives" "$(val s2 ".projects/$KS/api")" proj-value
+  sleep 1; printf 'user-value-2' | sec s2 put mine >/dev/null; on s2 sync --quiet; on s1 sync --quiet
+  ok "secrets: a change travels back" "$(val s1 mine)" user-value-2
+  sec s1 rm api --project; on s1 sync --quiet; on s2 sync --quiet
+  ok "secrets: a deletion travels" "$(val s2 ".projects/$KS/api")" ""
+  ok "secrets: the other secret stays" "$(val s2 mine)" user-value-2
+fi
+
 echo; [[ $fail -eq 0 ]] && echo "all $n passed" || echo "FAILED"
 exit $fail

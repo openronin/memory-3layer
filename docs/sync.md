@@ -84,6 +84,20 @@ Sync runs plain git, so what already works for git works here: `~/.ssh/config`, 
 - Sync never prompts. A key with a passphrase and no agent can't work in the background, so hooks need a key without one (limited to this repository), a token, or a running agent.
 - `memory-3layer sync check` tests read and write access, changes nothing, and says what to fix.
 
+## Secrets
+
+Secret values stay out of memory, and by default out of every storage: a new machine gets `secret://<name>` references with nothing behind them. A storage can also keep the values, encrypted:
+
+    memory-3layer secret sync on <address>      # asks for a password, kept only on this machine
+
+- A secret has a level, like memory. The user's own (`secret put <name>`) goes to the storage that holds identity, as `identity/_secrets/<name>.gpg`. A project's (`secret put <name> --project`) goes to that project's storage, as `projects/<key>/_secrets/<name>.gpg`. A reference `secret://<name>` is looked up in the project first, then among the user's own.
+- Each storage has its own password. It is stored in the secret store on the machine and is never sent. A secret routed to a storage without a password, or to `none`, stays on the machine.
+- A file is one secret, encrypted with `gpg --symmetric` (AES-256, the key derived from the password with the highest iteration count). Names are not hidden.
+- On another machine: connect the storage, sync, give the same password with `secret sync on <address>`, sync again. A password that does not open what the storage holds is reported, and nothing is encrypted with it.
+- A changed value replaces its file, and `secret rm` deletes the file on every machine. When two machines change one secret, the newer wins and the other encrypted copy is kept under `superseded/`.
+- What it does not protect from: everything stays in git history, so whoever gets a copy of the storage can try passwords offline for as long as they like, and a leaked password means every secret kept there is reissued. The password is as strong as the protection gets.
+- The credential of a storage itself can't come from that storage: it is entered by hand on a new machine.
+
 ## Mechanics
 
 Each storage is a private git repository, cloned to `~/.local/state/memory-3layer/stores/<id>/`. The data directory stays a single plain tree, so agents, hooks and search don't know about storages. Clones are only transport.
