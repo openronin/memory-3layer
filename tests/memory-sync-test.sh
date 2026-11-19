@@ -472,6 +472,8 @@ mk m1 "$HK/superseded/old.md" "old"; mk m1 "$HK/imported/claude-code/MEMORY.md" 
 r=$(on m1 sync); ok "hub: first member syncs" $? 0
 case "$r" in *"another machine"*) x=y ;; *) x=n ;; esac; ok "hub: a first sync does not report the machine's own tasks" $x n
 ok "hub: what the layout does not name stays on the machine" "$(git -C "$HB" ls-tree -r --name-only main | grep -cE 'superseded|imported|SESSION'):$(exists m1 "$HK/superseded/old.md")" "0:0"
+HR="$T/hubrepo"; git init -q "$HR"; git -C "$HR" remote add origin git@github.com:o/hub.git
+case "$(cd "$HR" && on m1 state)" in *"shared hub"*) x=y ;; *) x=n ;; esac; ok "hub: one member is not a shared hub" $x n
 on m3 sync --quiet; ok "hub: second member syncs" $? 0
 ok "hub: files go under the member's login" "$(git -C "$HB" show "main:$HK/@alice/CORE.md"):$(git -C "$HB" show "main:$HK/@bob/CORE.md")" "alice knows:bob knows"
 ok "hub: identity is namespaced too" "$(git -C "$HB" show main:identity/@alice/IDENTITY.md)" alice
@@ -484,7 +486,6 @@ ok "hub: the member's other machine gets it" "$(rd m2 "$HK/CORE.md"):$(rd m2 ide
 rm "$(data m1)/$HK/_tasks/t1.md"; on m1 sync --quiet; on m2 sync --quiet
 ok "hub: a deletion travels inside the namespace" "$(exists m2 "$HK/_tasks/t1.md"):$(git -C "$HB" show "main:$HK/@bob/CORE.md")" "1:bob knows"
 # --- the index counts other members' open tasks ---
-HR="$T/hubrepo"; git init -q "$HR"; git -C "$HR" remote add origin git@github.com:o/hub.git
 mk m3 "$HK/_tasks/bobs.md" "$(printf '## 2026-01-02T00:00:00Z-bbbb open s:2\nbob goal')"; on m3 sync --quiet; on m1 sync --quiet
 case "$(cd "$HR" && on m1 state)" in *"Other members' open tasks: 1 (bob 1)"*) r=y ;; *) r=n ;; esac; ok "hub: the index counts another member's tasks" $r y
 case "$(cd "$HR" && on m1 state --all)" in *"bob:"*"bobs ["*"bob goal"*) r=y ;; *) r=n ;; esac; ok "hub: state --all lists them" $r y

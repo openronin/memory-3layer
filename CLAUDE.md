@@ -42,7 +42,7 @@ A repository may still carry a `CLAUDE.md` or `.claude-docs/`, and the harness l
 | Who the user is, a hard preference, access that holds across projects | `IDENTITY.md`, at the user's word |
 | A secret | nowhere in memory: `secret://<name>` only |
 
-Nothing about a project goes into the repository's `CLAUDE.md` or `.claude-docs/`, and nothing in the repository is deleted unless the user asks.
+Nothing about a project goes into the repository's `CLAUDE.md` or `.claude-docs/`, and nothing in the repository is deleted unless the user asks. The exception is a repository that a team shares or that is not the user's own: when it has its own rules on documentation, they come first, and memory holds only what the repository does not.
 
 ## Rules
 

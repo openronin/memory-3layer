@@ -280,8 +280,13 @@ contact_row() {
   [[ -n "$HUB_LOGIN" ]] || return 0
   [[ -f "$c" ]] || printf '# Contacts\n\n| login | name | aliases | contact |\n|---|---|---|---|\n' > "$c"
   grep -qF "| $HUB_LOGIN |" "$c" || printf '| %s | %s |  |  |\n' "$HUB_LOGIN" "$HUB_LOGIN" >> "$c"
-  [[ $(grep -cE '^\| [a-z0-9]' "$c") -gt 1 ]] && HUB_SHARED=1
+  book_has_others "$c" && HUB_SHARED=1
   return 0
+}
+
+book_has_others() {
+  # book_has_others <contacts.md>: a row below the table's header with another login.
+  awk -F'|' -v me=" $HUB_LOGIN " '/^\|-/ { body = 1; next } body && $2 ~ /^ [a-z0-9]/ && $2 != me { n++ } END { exit !n }' "$1" 2>/dev/null
 }
 
 has_password() { [[ "$1" =~ ://[^/@:]+:[^/@]+@ ]]; }
@@ -928,7 +933,7 @@ cmd_members() {
   CLONE="$STORES/$(store_id "$ADDR")"; [[ -d "$CLONE/.git" ]] || return 0
   BRANCH=$(git -C "$CLONE" symbolic-ref --short HEAD 2>/dev/null || echo main)
   hub_mode 2>/dev/null && [[ -n "$HUB_LOGIN" ]] || return 0
-  [[ $(grep -cE '^\| [a-z0-9]' "$CLONE/contacts.md" 2>/dev/null) -gt 1 ]] && printf '#shared\t%s\n' "$ADDR"
+  book_has_others "$CLONE/contacts.md" && printf '#shared\t%s\n' "$ADDR"
   for d in "$CLONE/projects/$key"/@*/; do
     [[ -d "$d" ]] || continue
     login=${d%/}; login=${login##*/@}
