@@ -134,6 +134,8 @@ is_placeholder() {
   local v="$1" low
   low=$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')
   case "$v" in '<'*|'$'*|'{'*|'%'*|'['*|'('*|secret://*|*'('*|*'$'*|*'{{'*|*'->'*|/*|./*|~/*) return 0 ;; esac
+  # An expression in code, not a value: sys.argv[1], os.environ["X"], req.body.dbPass.
+  [[ "$v" == *'['*']'* || "$v" =~ ^[A-Za-z_]+(\.[A-Za-z_]+)+$ ]] && return 0
   case "$low" in *xxx*|*'***'*|*'...'*|*'…'*|*example*|*changeme*|*placeholder*|*redacted*|*your*|*dummy*|*sample*) return 0 ;; esac
   return 1
 }
@@ -300,6 +302,61 @@ bash_writes_memory() {
   return 1
 }
 
+bash_memory_text() {
+  # What a command writes to memory: each simple command that writes there, with
+  # its heredoc. The rest of the command line goes elsewhere and is not scanned.
+  local text=$1 head body
+  while IFS= read -r -d '' head && IFS= read -r -d '' body; do
+    bash_writes_memory "$head" && printf '%s\n%s\n' "$head" "$body"
+  done < <(printf '%s' "$text" | python3 -c '
+import re, sys
+lines = sys.stdin.read().split("\n")
+out = sys.stdout
+def pieces(head):
+    # Split at ; && || outside quotes and outside $( ).
+    res = []; cur = ""; q = ""; depth = 0; i = 0
+    while i < len(head):
+        c = head[i]
+        if q:
+            if c == "\\" and q == "\"": cur += head[i:i+2]; i += 2; continue
+            if c == q: q = ""
+        elif c == "\\": cur += head[i:i+2]; i += 2; continue
+        elif c in "\"\x27": q = c
+        elif c == "(": depth += 1
+        elif c == ")": depth = max(0, depth - 1)
+        elif depth == 0 and (c == ";" or head[i:i+2] in ("&&", "||")):
+            res.append(cur); cur = ""; i += 1 if c == ";" else 2; continue
+        cur += c; i += 1
+    res.append(cur)
+    return res
+def open_quote(s):
+    q = ""; i = 0
+    while i < len(s):
+        c = s[i]
+        if q:
+            if c == "\\" and q == "\"": i += 2; continue
+            if c == q: q = ""
+        elif c == "\\": i += 2; continue
+        elif c in "\"\x27": q = c
+        i += 1
+    return q
+n = 0
+while n < len(lines):
+    head = lines[n]; n += 1
+    while open_quote(head) and n < len(lines):
+        head += "\n" + lines[n]; n += 1
+    body = []
+    for d in re.findall(r"(?<!<)<<-?\s*[\"\x27]?([A-Za-z_][A-Za-z0-9_]*)", head):
+        while n < len(lines):
+            l = lines[n]; n += 1
+            if l.strip("\t") == d: break
+            body.append(l)
+    ps = pieces(head)
+    for k, piece in enumerate(ps):
+        out.write(piece + "\0" + ("\n".join(body) if "<<" in piece else "") + "\0")
+' 2>/dev/null)
+}
+
 cmd_guard() {
   # Blocks a secret on its way into memory. A clean Read, Write or Edit inside the
   # data dir is approved, because a plugin hook is the only way to grant this access
@@ -352,7 +409,8 @@ print(t); print(real); print(1 if inside else 0); sys.stdout.write(text)
       done < <(printf '%s\n' "$path" | tr '\t' '\n') ;;
   esac
   case "$tool" in
-    Bash) bash_writes_memory "$text" || return 0 ;;
+    Bash) bash_writes_memory "$text" || return 0
+      text=$(bash_memory_text "$text") ;;
     Patch)
       local f hit=0
       while IFS= read -r f; do is_memory_path "$f" && hit=1; done < <(printf '%s\n' "$path" | tr '\t' '\n')
