@@ -14,8 +14,8 @@ Search across L0 identity, L1-fallback project notes, and L2 session memory usin
 
 Optional flags:
 - `--here` — scope to current project's memory only (key from `memory-3layer key`)
-- `-c <collection>` — scope to one collection
-- `-n <N>` — top-N hits (default 5)
+- `-n <N>` — at most N results from each source (default: 10 from a hub, 5 files from local search)
+- `-c <collection>` — hybrid mode only: scope to one qmd collection
 
 ## How to execute
 
@@ -34,7 +34,8 @@ Optional flags:
 
 4. Scoping:
    - `--here`: `memory-3layer search --here "<USER_QUERY>"`. It lists the ranked files of this project; read the ones that fit. qmd has no path filter, so hybrid mode can't be limited to one project.
-   - `-c <name>` / `-n <N>`: pass through to qmd
+   - `-n <N>`: `memory-3layer search -n <N> "<USER_QUERY>"`; options go before the query, a query starting with `-` goes after `--`
+   - `-c <name>`: hybrid mode only, passed to qmd
 
    Without qmd, `memory-3layer search` matches plain text and prints `== <file>` with the first matching lines (`--here`: the files only). Read the files that fit; hybrid mode is unavailable then.
 
@@ -46,7 +47,7 @@ Optional flags:
 
 `memory-3layer search` prints the user's own memory first, then other members'.
 
-- `== own memory, search of hub <address>`: the hub's search, the first provider for the projects that hub holds. Lines are `path:line<TAB>[kind: title] snippet`, paths in the data directory: read the ones that fit.
+- `== own memory, search of hub <address>`: the hub's search, the first provider for the projects that hub holds. Lines are `path:line<TAB>score [kind: title] snippet`, paths in the data directory: read the ones that fit. Only results that contain words of the query come back, so synonyms are not found: retry with the words the note would use. No block means nothing matched. The score orders one answer and means nothing across queries.
 - `== own memory outside the hubs with a search`: the rest, through the local chain in `SEARCH_PROVIDERS` (config file from `memory-3layer path config`, `qmd plain` by default). When a hub's search does not answer, its projects are searched here too, and this block has no header.
 - `== own memory that the index of hub <address> does not have yet`: plain text over files changed after the hub indexed them, or never sent to it.
 - `== other members, hub <address>`: what other members wrote. Their notes, not this session's tasks.

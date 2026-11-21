@@ -163,10 +163,11 @@ A hub's search, when `README.md` names one. The client sends its token only to t
 - A kind follows from the path: `identity` (`IDENTITY.md`), `core` (`CORE.md`), `corelog`, `corearchive`, `task` (open journals), `taskarchive` (closed ones). Files under `.files/`, and files this text does not name, are not indexed.
 - The unit of a result is a record for journals and `CORE.log.*`, and a section (the text under one heading) for the other files. `record` is the record's id, absent for a section. `title` is optional: the task's name and the record's kind for a journal, the heading for a section, shown before the snippet. `line` is the line of the match. `project` is absent for `identity`.
 - A result is a pointer plus a short snippet. The client reads the text from its own clone by `path`, so the service needs no endpoint that serves files.
-- `score` orders the results of one answer and means nothing beyond it.
+- `score` orders the results of one answer and means nothing beyond it. The client shows it before the title.
+- `results` empty with 200 means nothing was found, not a failure.
 - `indexed` is the commit the index was built from, `null` for an empty hub. The client's last push is searchable when it is an ancestor of `indexed`.
 - The service indexes `main` after a push, in the background. `identity/` of other members is indexed like the rest: the hub is the trust boundary.
-- `limit` is 20 when absent. A service may cap it and may cap the length of a query.
+- `limit` is 20 when absent. A service may cap it and may cap the length of a query. The client asks for 10, or for N with `search -n N`.
 
 A failure is a status with `{"error": "<code>", "message": "<one line>"}`. On any failure the client goes to the next provider. It also tells the user when a person has to act:
 

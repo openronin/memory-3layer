@@ -617,14 +617,24 @@ cmd_projects() {
 }
 
 cmd_search() {
-  # search [--here] <query>. The user's own memory first, then what other members of a
+  # search [--here] [-n N] [--] <query>. The user's own memory first, then what other members of a
   # connected hub wrote, shown apart because their rankings don't compare. A hub's search
   # is the first provider for what that hub holds. The rest, and all of it when a hub's
   # search does not answer, goes to the chain of local providers: the next one is used
   # when a provider fails, never because it found nothing.
-  local here="" key="" p rc OWN="" FRESH="" OTHERS="" COVERED=""
-  [[ "${1:-}" == --here ]] && { here=--here; shift; }
-  [[ $# -gt 0 ]] || die "usage: search [--here] <query>"
+  local here="" key="" p rc OWN="" FRESH="" OTHERS="" COVERED="" SEARCH_N=""
+  local usage="usage: search [--here] [-n N] [--] <query>"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --here) here=--here; shift ;;
+      -n) [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "search: -n needs a positive number"; SEARCH_N=$2; shift 2 ;;
+      -h|--help) echo "$usage"; return 0 ;;
+      --) shift; break ;;
+      -*) die "search: unknown option $1; a query that starts with - goes after --" ;;
+      *) break ;;
+    esac
+  done
+  [[ $# -gt 0 ]] || die "$usage"
   [[ -z "$here" ]] || key=$(project_key)
   search_hubs "$key" "$*"
   [[ -z "$OWN" ]] || printf '%s\n' "${OWN#$'\n'}"
@@ -666,13 +676,13 @@ search_qmd() {
     local prefix
     prefix="qmd://memory-3layer/projects/$(project_key | qmd_form)/"
     out=$(qmd search "$*" -c memory-3layer --files -n 200) || return 1
-    printf '%s\n' "$out" | awk -F, -v p="$prefix" 'index($3, p) == 1' | head -n 10
+    printf '%s\n' "$out" | awk -F, -v p="$prefix" 'index($3, p) == 1' | head -n "${SEARCH_N:-10}"
   elif [[ -n "$COVERED" ]]; then
     out=$(qmd search "$*" -c memory-3layer --files -n 200) || return 1
     cov=$(printf '%s\n' "$COVERED" | sed "s#^$HOME_DIR/##" | qmd_form | sed 's#^#qmd://memory-3layer/#')
-    printf '%s\n' "$out" | COVERED=$cov drop_covered 3 | head -n 10
+    printf '%s\n' "$out" | COVERED=$cov drop_covered 3 | head -n "${SEARCH_N:-10}"
   else
-    qmd search "$*" -c memory-3layer -n 5
+    qmd search "$*" -c memory-3layer -n "${SEARCH_N:-5}"
   fi
 }
 
@@ -712,8 +722,8 @@ plain_lines() {
 search_plain() {
   # Without qmd: plain text. Archives are found only by search, so no qmd must not mean
   # no search.
-  local here=0 dir="$HOME_DIR" n=5
-  [[ "${1:-}" == --here ]] && { here=1; shift; dir="$HOME_DIR/projects/$(project_key)"; n=10; }
+  local here=0 dir="$HOME_DIR" n=${SEARCH_N:-5}
+  [[ "${1:-}" == --here ]] && { here=1; shift; dir="$HOME_DIR/projects/$(project_key)"; n=${SEARCH_N:-10}; }
   [[ -d "$dir" ]] || return 0
   echo "qmd is not installed: plain-text search, files with the most of the words first." >&2
   local files
@@ -727,12 +737,12 @@ url_host() { printf '%s' "$1" | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/@]*@)?
 
 hub_query() {
   # hub_query <search address> <secret name> <key or nothing> <query>: ask the hub. Prints
-  # "#indexed <commit>", then login, path, line, kind, title and snippet, tab-separated,
+  # "#indexed <commit>", then login, path, line, kind, title, score and snippet, tab-separated,
   # one result a line ("-" for an empty field), and succeeds; or fails for the fallback. The token goes only to the
   # host the hub's repository is on, checked by the caller. CORE.log repeats CORE.md.
   local url=$1 secret=$2 key=$3 q=$4 body out code
   command -v curl >/dev/null && command -v python3 >/dev/null || return 1
-  body="{\"query\":\"$(json_escape "$q")\",\"projects\":[${key:+\"$(json_escape "$key")\"}],\"kinds\":[\"identity\",\"core\",\"corearchive\",\"task\",\"taskarchive\"],\"limit\":20}"
+  body="{\"query\":\"$(json_escape "$q")\",\"projects\":[${key:+\"$(json_escape "$key")\"}],\"kinds\":[\"identity\",\"core\",\"corearchive\",\"task\",\"taskarchive\"],\"limit\":${SEARCH_N:-10}}"
   out=$(MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" bash "$SELF_DIR/memory-secrets.sh" run "MEMORY_3LAYER_HUB_TOKEN=$secret" -- \
     bash -c 'curl -sS --max-time "$3" -w "\n%{http_code}" -X POST "$1" -H "Authorization: Bearer $MEMORY_3LAYER_HUB_TOKEN" -H "Content-Type: application/json" -d "$2"' _ "$url" "$body" "${MEMORY_3LAYER_SEARCH_TIMEOUT:-10}" 2>/dev/null) || return 1
   code=${out##*$'\n'}; out=${out%$'\n'*}
@@ -750,10 +760,16 @@ try:
 except Exception:
     sys.exit(1)
 flat = lambda v, n: " ".join(str(v or "").split())[:n]
+def score(v):
+    try:
+        return "%.3g" % float(v)
+    except (TypeError, ValueError):
+        return "-"
 print("#indexed %s" % (data.get("indexed") or "-"))
 for r in rows:
     print("\t".join([flat(r.get("login"), 100) or "?", flat(r.get("path"), 1000), str(r.get("line") or 1),
-                     flat(r.get("kind"), 20) or "-", flat(r.get("title"), 120) or "-", flat(r.get("snippet"), 300)]))
+                     flat(r.get("kind"), 20) or "-", flat(r.get("title"), 120) or "-", score(r.get("score")),
+                     flat(r.get("snippet"), 300)]))
 '
 }
 
@@ -761,15 +777,17 @@ hub_rows() {
   # hub_rows <address> <clone> <own login> <rows>: a hub's answer, split into the user's own
   # results, with paths in the data directory, which has the freshest copy, and other
   # members', with paths in the clone.
-  local addr=$1 clone=$2 me=$3 who path line kind title snip own="" theirs=""
-  while IFS=$'\t' read -r who path line kind title snip; do
+  local addr=$1 clone=$2 me=$3 who path line kind title score snip own="" theirs="" s
+  while IFS=$'\t' read -r who path line kind title score snip; do
     [[ -n "$path" ]] || continue
     # read folds empty fields between tabs, so the hub's answer has "-" for none.
     [[ "$title" != - ]] || title=""
+    # The score orders one answer only; shown so a weak tail can be told from the top.
+    s=""; [[ "$score" == - || -z "$score" ]] || s="$score "
     if [[ "$who" == "$me" ]]; then
-      own+=$'\n'"$HOME_DIR/${path/\/@$me\//\/}:$line"$'\t'"[$kind${title:+: $title}] $snip"
+      own+=$'\n'"$HOME_DIR/${path/\/@$me\//\/}:$line"$'\t'"$s[$kind${title:+: $title}] $snip"
     else
-      theirs+=$'\n'"$clone/$path:$line"$'\t'"[$who${title:+: $title}] $snip"
+      theirs+=$'\n'"$clone/$path:$line"$'\t'"$s[$who${title:+: $title}] $snip"
     fi
   done <<< "$4"
   [[ -z "$own" ]] || OWN+=$'\n'"== own memory, search of hub $addr$own"
@@ -802,7 +820,7 @@ hub_covers() {
         !(($1 "\t" $2) in have) { print $2 }' <( [[ "$idx" == - ]] || git -C "$clone" ls-tree -r "$idx" ) -)
   [[ -n "$fresh" ]] || return 0
   mapfile -t list <<< "$fresh"
-  out=$(COVERED="" plain_files 10 superseded "$q" "${list[@]}")
+  out=$(COVERED="" plain_files "${SEARCH_N:-10}" superseded "$q" "${list[@]}")
   [[ -n "$out" ]] || return 0
   FRESH+=$'\n'"== own memory that the index of hub $addr does not have yet (plain text)"$'\n'"$(plain_lines "$q" <<< "$out")"
 }
@@ -837,7 +855,7 @@ search_hubs() {
       # Nobody else in scope: nothing to add to the user's own memory.
       compgen -G "$dir/@*" >/dev/null || [[ -z "$key" ]] || continue
       [[ -d "$dir" ]] || continue
-      out=$(plain_files 5 "@$login" "$q" "$dir")
+      out=$(plain_files "${SEARCH_N:-5}" "@$login" "$q" "$dir")
       [[ -n "$out" ]] || continue
       OTHERS+=$'\n'"== other members, hub $addr ($why: plain text over the local copy)"$'\n'"$(plain_lines "$q" <<< "$out")"
     fi
@@ -884,7 +902,7 @@ memory-3layer — agent memory that belongs to no harness
   rekey <old key> <new key>                     move memory after a remote changed
   projects                                      keys that have memory
   assign <old folder> <key>                     give an unattributed folder its project
-  search [--here] <query>                       search own memory, and other members' in a hub
+  search [--here] [-n N] <query>                search own memory, and other members' in a hub
   refresh [--debounce]                          rebuild the search index
   guard                                         PreToolUse hook: block secrets, allow the data dir
   secret <command>                              local secret store: put, list, run, scan...

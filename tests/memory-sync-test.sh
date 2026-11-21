@@ -495,10 +495,10 @@ r=$(cd "$HR" && PATH="$(dirname "$(command -v bash)"):/usr/bin:/bin" on m1 searc
 case "$r" in *"other members"*"@bob/CORE.md"*zebra*) x=y ;; *) x=n ;; esac; ok "hub: search finds another member's text" $x y
 case "$(cd "$HR" && on m1 search --here alice 2>/dev/null)" in *"@alice"*) x=y ;; *) x=n ;; esac; ok "hub: own namespace is not searched twice" $x n
 # --- a hub's search answers for the user's own memory too, and the local providers skip it ---
-mkdir -p "$T/fake"; printf '%s\n' '#!/bin/sh' "printf '%s\\n200' '{\"indexed\":null,\"results\":[{\"login\":\"alice\",\"path\":\"$HK/@alice/CORE.md\",\"line\":1,\"kind\":\"core\",\"snippet\":\"own zebra\"},{\"login\":\"bob\",\"path\":\"$HK/@bob/CORE.md\",\"line\":1,\"kind\":\"core\",\"snippet\":\"bob zebra\"}]}'" > "$T/fake/curl"; chmod +x "$T/fake/curl"
+mkdir -p "$T/fake"; printf '%s\n' '#!/bin/sh' "printf '%s\\n200' '{\"indexed\":null,\"results\":[{\"login\":\"alice\",\"path\":\"$HK/@alice/CORE.md\",\"line\":1,\"kind\":\"core\",\"snippet\":\"own zebra\",\"score\":12.345},{\"login\":\"bob\",\"path\":\"$HK/@bob/CORE.md\",\"line\":1,\"kind\":\"core\",\"snippet\":\"bob zebra\"}]}'" > "$T/fake/curl"; chmod +x "$T/fake/curl"
 printf 'tok' | on m1 secret put hubtok >/dev/null; cp "$(conf m1)" "$T/conf.m1"; sed -i.bak "s#^\[storage $HB\]#&\npassword = secret://hubtok#" "$(conf m1)"
 r=$(cd "$HR" && PATH="$T/fake:$PATH" MEMORY_3LAYER_SEARCH_URL=file:///search on m1 search --here zebra 2>&1)
-case "$r" in *"own memory, search of hub"*"$(data m1)/$HK/CORE.md:1"*"[core] own zebra"*"other members"*"@bob/CORE.md:1"*) x=y ;; *) x=n ;; esac; ok "hub search: own results come first, with paths in the data dir" $x y
+case "$r" in *"own memory, search of hub"*"$(data m1)/$HK/CORE.md:1"$'\t'"12.3 [core] own zebra"*"other members"*"@bob/CORE.md:1"*) x=y ;; *) x=n ;; esac; ok "hub search: own results come first, with paths in the data dir" $x y
 case "$r" in *"qmd is not installed"*) x=y ;; *) x=n ;; esac; ok "hub search: a project it covers is not searched again" $x n
 cp "$T/conf.m1" "$(conf m1)"
 git -C "$T/hubclone" pull -q origin main 2>/dev/null; on m1 hub contact rm "$T/hubclone" bob >/dev/null
