@@ -194,6 +194,7 @@ m task files nosuch >/dev/null 2>&1; ok "files of an unknown task refused" $? 2
 # --- close ---
 echo x | m task close nosuch >/dev/null 2>&1; ok "close unknown refused" $? 2
 printf '' | m task close ship >/dev/null 2>&1; ok "close needs a result" $? 2
+out=$(sleep 5 | MEMORY_3LAYER_STDIN_WAIT=1 m task close ship 2>&1); ok "close does not hang on an open empty stdin" $? 2
 echo "Shipped v1" | m task close ship >/dev/null; ok "close works" $? 0
 ok "journal left the active list" "$(test -e "$J/ship.md"; echo $?)" 1
 A=$(ls "$J"/archive/*/ship.md); ok "journal archived whole" "$(grep -c 'just a note' "$A")" 1

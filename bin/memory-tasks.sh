@@ -50,7 +50,11 @@ read_body() {
   # terminal, so a command run with no text arrives here as empty stdin.
   local how="pass it on stdin: memory-3layer $2 <<'EOF' ... EOF"
   [[ ! -t 0 ]] || die "$1 is missing, $how"
-  BODY=$(cat)
+  # An agent's stdin may be a pipe that stays open with nothing in it: cat would wait forever.
+  local first wait="${MEMORY_3LAYER_STDIN_WAIT:-10}" rc=0
+  IFS= read -r -t "$wait" -N 1 first || rc=$?
+  (( rc > 128 )) && die "$1 is missing: nothing came on stdin in ${wait} s, $how"
+  BODY="$first$(cat)"
   [[ "$BODY" =~ [^[:space:]] ]] || die "$1 is missing, $how"
   scan "$BODY"
   # A line shaped like a header would split the record when it is read back.
