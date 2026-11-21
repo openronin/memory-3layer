@@ -136,12 +136,14 @@ Handing a task to another member is not in contract 1.
 
 ## Search
 
-`memory-3layer search` answers in two parts, shown apart because their rankings don't compare.
+`memory-3layer search` answers in two parts, shown apart because their rankings don't compare: the user's own memory first, then what other members wrote.
 
-- **The user's own memory** is searched on the machine, in the data directory, by a chain of local providers: `SEARCH_PROVIDERS` in the client's config, `qmd plain` by default. The next one is used when a provider fails, never because it found nothing. A provider of the user's own is a name in that chain and a command in `SEARCH_CMD_<name>`: the query in its arguments, the directory in `MEMORY_3LAYER_SEARCH_DIR`, one result per line on stdout, `path:line<TAB>snippet`.
-- **What other members wrote** comes from the hub's search. When the hub has none, or it fails, the client searches the other namespaces in its clone as plain text. Results of the user's own login are left out of this part.
+- **A hub's search is the first provider** for what that hub holds. It answers for both parts: the user's own results are shown with paths in the data directory, which has the freshest copy, other members' with paths in the clone.
+- **What the hub's index does not have yet** is searched on the machine as plain text: files of the hub's projects that differ from their copy at the `indexed` commit, or were never sent (`SESSION` archives). Blob ids are compared, so a file that only came in with a pull is not counted.
+- **The rest of the user's own memory**, and all of it when a hub's search fails, goes to a chain of local providers: `SEARCH_PROVIDERS` in the client's config, `qmd plain` by default. The next one is used when a provider fails, never because it found nothing. A provider of the user's own is a name in that chain and a command in `SEARCH_CMD_<name>`: the query in its arguments, the directory in `MEMORY_3LAYER_SEARCH_DIR`, one result per line on stdout, `path:line<TAB>snippet`. Lines under what a hub's search answered for are dropped.
+- **Other members' memory in a hub without a search**, or when it fails, is searched as plain text in the clone.
 
-With `--here` both parts are limited to the project of the current directory, and only the hub that holds it is asked. A query goes to a hub's search only for what is kept in that hub; no other remote provider exists.
+With `--here` everything is limited to the project of the current directory, and only the hub that holds it is asked. A query goes to a hub's search only for what is kept in that hub; no other remote provider exists. `CORE.log` repeats `CORE.md`, so the client leaves the kind `corelog` out of its queries.
 
 A hub's search, when `README.md` names one. The client sends its token only to the host of the hub's git remote, and ignores a `search` address on any other host.
 
@@ -155,11 +157,11 @@ A hub's search, when `README.md` names one. The client sends its token only to t
      "results": [{"path": "projects/github.com/owner/repo/@bob/_tasks/archive/2026-10/mongo-move.md",
                   "line": 41, "record": "2026-10-12T08:01:55Z-19be", "kind": "taskarchive",
                   "project": "github.com/owner/repo", "login": "bob",
-                  "snippet": "...", "score": 0.81}]}
+                  "title": "mongo-move: note", "snippet": "...", "score": 0.81}]}
 
 - `projects`, `logins`, `kinds` narrow the scope, and an empty list means all. `projects` matches a key exactly: the client expands `aliases.tsv` before it asks.
 - A kind follows from the path: `identity` (`IDENTITY.md`), `core` (`CORE.md`), `corelog`, `corearchive`, `task` (open journals), `taskarchive` (closed ones). Files under `.files/`, and files this text does not name, are not indexed.
-- The unit of a result is a record for journals and `CORE.log.*`, and a section (the text under one heading) for the other files. `record` is the record's id, absent for a section. `line` is the line of the match. `project` is absent for `identity`.
+- The unit of a result is a record for journals and `CORE.log.*`, and a section (the text under one heading) for the other files. `record` is the record's id, absent for a section. `title` is optional: the task's name and the record's kind for a journal, the heading for a section, shown before the snippet. `line` is the line of the match. `project` is absent for `identity`.
 - A result is a pointer plus a short snippet. The client reads the text from its own clone by `path`, so the service needs no endpoint that serves files.
 - `score` orders the results of one answer and means nothing beyond it.
 - `indexed` is the commit the index was built from, `null` for an empty hub. The client's last push is searchable when it is an ancestor of `indexed`.

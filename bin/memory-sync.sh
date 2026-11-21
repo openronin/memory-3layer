@@ -1090,6 +1090,17 @@ cmd_hubs() {
   done
 }
 
+cmd_scope() {
+  # scope <address>: what of the data directory a storage holds, for search. Project keys
+  # come on stdin; prints "identity" and the keys whose journals go to that storage.
+  local addr=$1 key
+  load_conf
+  [[ "$(route - identity)" != "$addr" ]] || echo identity
+  while IFS= read -r key; do
+    [[ -z "$key" || "$(route "$key" session)" != "$addr" ]] || printf '%s\n' "$key"
+  done
+}
+
 hint() {
   # hint <address> <problem>: what the user can do about it.
   local a=$1 key=${ACCESS[$1|ssh_key]:-} ssh=0
@@ -1201,6 +1212,7 @@ case "$sub" in
   check) cmd_check ;;
   members) shift; cmd_members "$@" ;;
   hubs) shift; cmd_hubs "$@" ;;
+  scope) shift; cmd_scope "$@" ;;
   tick) shift; cmd_tick "$@" ;;
   *)
     while [[ $# -gt 0 ]]; do

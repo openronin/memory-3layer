@@ -617,36 +617,60 @@ cmd_projects() {
 }
 
 cmd_search() {
-  # search [--here] <query>. Two parts, shown apart because their rankings don't compare:
-  # this user's own memory, through the chain of local providers, and what other members
-  # of a connected hub wrote, through the hub's search or, failing that, its clone.
-  # A provider that fails hands over to the next one; one that finds nothing does not.
-  local here="" p rc
+  # search [--here] <query>. The user's own memory first, then what other members of a
+  # connected hub wrote, shown apart because their rankings don't compare. A hub's search
+  # is the first provider for what that hub holds. The rest, and all of it when a hub's
+  # search does not answer, goes to the chain of local providers: the next one is used
+  # when a provider fails, never because it found nothing.
+  local here="" key="" p rc OWN="" FRESH="" OTHERS="" COVERED=""
   [[ "${1:-}" == --here ]] && { here=--here; shift; }
   [[ $# -gt 0 ]] || die "usage: search [--here] <query>"
-  for p in ${SEARCH_PROVIDERS:-qmd plain}; do
-    rc=0
-    case "$p" in
-      qmd) search_qmd $here "$@" || rc=$? ;;
-      plain) search_plain $here "$@" || rc=$? ;;
-      *) search_command "$p" "$here" "$@" || rc=$? ;;
-    esac
-    [[ $rc -eq 0 ]] && break
-  done
-  search_hubs "$here" "$@"
+  [[ -z "$here" ]] || key=$(project_key)
+  search_hubs "$key" "$*"
+  [[ -z "$OWN" ]] || printf '%s\n' "${OWN#$'\n'}"
+  if [[ -z "$here" ]] || ! grep -qxF "$HOME_DIR/projects/$key" <<< "$COVERED"; then
+    [[ -z "$COVERED" ]] || printf '\n== own memory outside the hubs with a search\n'
+    for p in ${SEARCH_PROVIDERS:-qmd plain}; do
+      rc=0
+      case "$p" in
+        qmd) search_qmd $here "$@" || rc=$? ;;
+        plain) search_plain $here "$@" || rc=$? ;;
+        *) search_command "$p" "$here" "$@" || rc=$? ;;
+      esac
+      [[ $rc -eq 0 ]] && break
+    done
+  fi
+  [[ -z "$FRESH" ]] || printf '%s\n' "$FRESH"
+  [[ -z "$OTHERS" ]] || printf '%s\n' "$OTHERS"
+  return 0
 }
 
+drop_covered() {
+  # drop_covered [comma field]: the lines of stdin whose path, the whole line or the given
+  # field, is not under a directory in COVERED: a hub's search has answered for those.
+  [[ -n "$COVERED" ]] || { cat; return 0; }
+  COV="$COVERED" awk -F, -v f="${1:-0}" 'BEGIN { n = split(ENVIRON["COV"], p, "\n") }
+    { s = f ? $f : $0; for (i = 1; i <= n; i++) if (p[i] != "" && index(s, p[i] "/") == 1) next; print }'
+}
+
+qmd_form() { tr '.' '-' | tr '[:upper:]' '[:lower:]'; }
+
 search_qmd() {
-  # BM25 through qmd. qmd has no path filter (it silently ignores --filter), so --here
-  # filters its ranked file list. qmd also rewrites paths, turning dots into dashes, and
-  # the key has to be compared in that form.
+  # BM25 through qmd. qmd has no path filter (it silently ignores --filter), so --here and
+  # what a hub's search covers filter its ranked file list. qmd also rewrites paths,
+  # turning dots into dashes, and they have to be compared in that form.
   command -v qmd >/dev/null 2>&1 || return 1
+  local out cov
   if [[ "${1:-}" == --here ]]; then
     shift
-    local prefix out
-    prefix="qmd://memory-3layer/projects/$(project_key | tr '.' '-' | tr '[:upper:]' '[:lower:]')/"
+    local prefix
+    prefix="qmd://memory-3layer/projects/$(project_key | qmd_form)/"
     out=$(qmd search "$*" -c memory-3layer --files -n 200) || return 1
     printf '%s\n' "$out" | awk -F, -v p="$prefix" 'index($3, p) == 1' | head -n 10
+  elif [[ -n "$COVERED" ]]; then
+    out=$(qmd search "$*" -c memory-3layer --files -n 200) || return 1
+    cov=$(printf '%s\n' "$COVERED" | sed "s#^$HOME_DIR/##" | qmd_form | sed 's#^#qmd://memory-3layer/#')
+    printf '%s\n' "$out" | COVERED=$cov drop_covered 3 | head -n 10
   else
     qmd search "$*" -c memory-3layer -n 5
   fi
@@ -656,28 +680,29 @@ search_command() {
   # search_command <name> <--here or nothing> <query...>: a provider of the user's own,
   # SEARCH_CMD_<name> in the config. It gets the query as arguments and the directory to
   # search in MEMORY_3LAYER_SEARCH_DIR, and prints path:line<TAB>snippet per result.
-  local name=$1 here=$2 var cmd dir="$HOME_DIR"; shift 2
+  local name=$1 here=$2 var cmd dir="$HOME_DIR" out; shift 2
   [[ "$name" =~ ^[A-Za-z0-9_]+$ ]] || { echo "search: bad provider name '$name'" >&2; return 1; }
   var="SEARCH_CMD_$name"; cmd=${!var:-}
   [[ -n "$cmd" ]] || { echo "search: provider '$name' has no $var in $CONFIG_FILE" >&2; return 1; }
   [[ -z "$here" ]] || dir="$HOME_DIR/projects/$(project_key)"
-  MEMORY_3LAYER_SEARCH_DIR="$dir" bash -c "$cmd \"\$@\"" search "$@"
+  out=$(MEMORY_3LAYER_SEARCH_DIR="$dir" bash -c "$cmd \"\$@\"" search "$@") || return $?
+  [[ -z "$out" ]] || printf '%s\n' "$out" | drop_covered
 }
 
 plain_files() {
-  # plain_files <n> <directory> <a directory name to skip> <words...>: files that hold
-  # the most of the words, then the most matching lines.
-  local n=$1 dir=$2 skip=$3 w; shift 3
-  local -a args=(); for w in "$@"; do args+=(-e "$w"); done
-  for w in "$@"; do grep -rilF --include='*.md' --exclude-dir=superseded --exclude-dir=.git --exclude-dir='*.files' --exclude-dir="$skip" -- "$w" "$dir" 2>/dev/null; done \
-    | sort | uniq -c | sort -rn | awk '{ $1 = $1 } 1' | while read -r cnt f; do
+  # plain_files <n> <a directory name to skip> <query> <paths...>: files that hold the most
+  # of the words, then the most matching lines. CORE.log repeats CORE.md and is skipped.
+  local n=$1 skip=$2 w; local -a words args=(); read -ra words <<< "$3"; shift 3
+  for w in "${words[@]}"; do args+=(-e "$w"); done
+  for w in "${words[@]}"; do grep -rilF --include='*.md' --exclude='CORE.log.*' --exclude-dir=superseded --exclude-dir=.git --exclude-dir='*.files' --exclude-dir="$skip" -- "$w" "$@" 2>/dev/null; done \
+    | drop_covered | sort | uniq -c | sort -rn | awk '{ $1 = $1 } 1' | while read -r cnt f; do
         printf '%d\t%d\t%s\n' "$cnt" "$(grep -ciF "${args[@]}" -- "$f")" "$f"
       done | sort -t$'\t' -k1,1nr -k2,2nr | head -n "$n" | cut -f3
 }
 
 plain_lines() {
-  # plain_lines <words...>: for each file on stdin, its name and its first matching lines.
-  local w f; local -a args=(); for w in "$@"; do args+=(-e "$w"); done
+  # plain_lines <query>: for each file on stdin, its name and its first matching lines.
+  local w f; local -a words args=(); read -ra words <<< "$1"; for w in "${words[@]}"; do args+=(-e "$w"); done
   while IFS= read -r f; do
     echo "== $f"
     grep -niF "${args[@]}" -- "$f" | head -n 3 | cut -c1-300
@@ -691,25 +716,25 @@ search_plain() {
   [[ "${1:-}" == --here ]] && { here=1; shift; dir="$HOME_DIR/projects/$(project_key)"; n=10; }
   [[ -d "$dir" ]] || return 0
   echo "qmd is not installed: plain-text search, files with the most of the words first." >&2
-  local -a words; read -ra words <<< "$*"
   local files
-  files=$(plain_files "$n" "$dir" superseded "${words[@]}")
+  files=$(plain_files "$n" superseded "$*" "$dir")
   [[ -n "$files" ]] || { echo "nothing found" >&2; return 0; }
   if (( here )); then printf '%s\n' "$files"; return 0; fi
-  plain_lines "${words[@]}" <<< "$files"
+  plain_lines "$*" <<< "$files"
 }
 
 url_host() { printf '%s' "$1" | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/@]*@)?([^/]+).*#\2#p'; }
 
 hub_query() {
-  # hub_query <search address> <secret name> <key or nothing> <own login> <clone> <query>:
-  # ask the hub. Prints results of other members and succeeds, or fails for the fallback.
-  # The token goes only to the host the hub's repository is on, checked by the caller.
-  local url=$1 secret=$2 key=$3 me=$4 clone=$5 q=$6 body out code
+  # hub_query <search address> <secret name> <key or nothing> <query>: ask the hub. Prints
+  # "#indexed <commit>", then login, path, line, kind, title and snippet, tab-separated,
+  # one result a line ("-" for an empty field), and succeeds; or fails for the fallback. The token goes only to the
+  # host the hub's repository is on, checked by the caller. CORE.log repeats CORE.md.
+  local url=$1 secret=$2 key=$3 q=$4 body out code
   command -v curl >/dev/null && command -v python3 >/dev/null || return 1
-  body="{\"query\":\"$(json_escape "$q")\",\"projects\":[${key:+\"$(json_escape "$key")\"}],\"limit\":20}"
+  body="{\"query\":\"$(json_escape "$q")\",\"projects\":[${key:+\"$(json_escape "$key")\"}],\"kinds\":[\"identity\",\"core\",\"corearchive\",\"task\",\"taskarchive\"],\"limit\":20}"
   out=$(MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" bash "$SELF_DIR/memory-secrets.sh" run "MEMORY_3LAYER_HUB_TOKEN=$secret" -- \
-    bash -c 'curl -sS --max-time 20 -w "\n%{http_code}" -X POST "$1" -H "Authorization: Bearer $MEMORY_3LAYER_HUB_TOKEN" -H "Content-Type: application/json" -d "$2"' _ "$url" "$body" 2>/dev/null) || return 1
+    bash -c 'curl -sS --max-time "$3" -w "\n%{http_code}" -X POST "$1" -H "Authorization: Bearer $MEMORY_3LAYER_HUB_TOKEN" -H "Content-Type: application/json" -d "$2"' _ "$url" "$body" "${MEMORY_3LAYER_SEARCH_TIMEOUT:-10}" 2>/dev/null) || return 1
   code=${out##*$'\n'}; out=${out%$'\n'*}
   case "$code" in
     200) ;;
@@ -719,54 +744,102 @@ hub_query() {
   esac
   printf '%s' "$out" | python3 -c '
 import json, sys
-me, clone = sys.argv[1], sys.argv[2]
 try:
     data = json.load(sys.stdin)
     rows = data.get("results", [])
 except Exception:
     sys.exit(1)
+flat = lambda v, n: " ".join(str(v or "").split())[:n]
 print("#indexed %s" % (data.get("indexed") or "-"))
 for r in rows:
-    if r.get("login") == me:
-        continue
-    snip = " ".join(str(r.get("snippet", "")).split())[:300]
-    print("%s/%s:%s\t[%s] %s" % (clone, r.get("path", ""), r.get("line", 1), r.get("login", "?"), snip))
-' "$me" "$clone"
+    print("\t".join([flat(r.get("login"), 100) or "?", flat(r.get("path"), 1000), str(r.get("line") or 1),
+                     flat(r.get("kind"), 20) or "-", flat(r.get("title"), 120) or "-", flat(r.get("snippet"), 300)]))
+'
+}
+
+hub_rows() {
+  # hub_rows <address> <clone> <own login> <rows>: a hub's answer, split into the user's own
+  # results, with paths in the data directory, which has the freshest copy, and other
+  # members', with paths in the clone.
+  local addr=$1 clone=$2 me=$3 who path line kind title snip own="" theirs=""
+  while IFS=$'\t' read -r who path line kind title snip; do
+    [[ -n "$path" ]] || continue
+    # read folds empty fields between tabs, so the hub's answer has "-" for none.
+    [[ "$title" != - ]] || title=""
+    if [[ "$who" == "$me" ]]; then
+      own+=$'\n'"$HOME_DIR/${path/\/@$me\//\/}:$line"$'\t'"[$kind${title:+: $title}] $snip"
+    else
+      theirs+=$'\n'"$clone/$path:$line"$'\t'"[$who${title:+: $title}] $snip"
+    fi
+  done <<< "$4"
+  [[ -z "$own" ]] || OWN+=$'\n'"== own memory, search of hub $addr$own"
+  [[ -z "$theirs" ]] || OTHERS+=$'\n'"== other members, hub $addr$theirs"
+}
+
+hub_covers() {
+  # hub_covers <address> <clone> <own login> <key or nothing> <indexed commit> <query>: add
+  # what of the user's own memory this hub's search answered for to COVERED, and search as
+  # plain text the files of it that its index does not have as they are here: changed
+  # since, or never sent, like SESSION archives.
+  local addr=$1 clone=$2 me=$3 key=$4 idx=$5 q=$6 k files fresh out
+  local -a dirs=() list=()
+  if [[ -n "$key" ]]; then dirs=("$HOME_DIR/projects/$key")
+  else
+    while IFS= read -r k; do
+      if [[ "$k" == identity ]]; then dirs+=("$HOME_DIR/identity"); else dirs+=("$HOME_DIR/projects/$k"); fi
+    done < <(cmd_projects | MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" \
+               bash "$SELF_DIR/memory-sync.sh" scope "$addr" 2>/dev/null)
+  fi
+  (( ${#dirs[@]} )) || return 0
+  COVERED+="${COVERED:+$'\n'}$(printf '%s\n' "${dirs[@]}")"
+  files=$(find "${dirs[@]}" -type f -name '*.md' ! -path '*/superseded/*' ! -path '*/.git/*' 2>/dev/null)
+  [[ -n "$files" ]] || return 0
+  # An index that is not in the clone yet is newer than it: compare with the clone then.
+  [[ "$idx" == - ]] || git -C "$clone" cat-file -e "$idx^{commit}" 2>/dev/null || idx=HEAD
+  fresh=$(paste <(printf '%s\n' "$files" | git hash-object --no-filters --stdin-paths) <(printf '%s\n' "$files") \
+    | awk -F'\t' -v home="$HOME_DIR/" -v me="/@$me/" '
+        FILENAME != "-" { split($1, a, " "); p = $2; i = index(p, me); if (i) have[a[3] "\t" home substr(p, 1, i) substr(p, i + length(me))] = 1; next }
+        !(($1 "\t" $2) in have) { print $2 }' <( [[ "$idx" == - ]] || git -C "$clone" ls-tree -r "$idx" ) -)
+  [[ -n "$fresh" ]] || return 0
+  mapfile -t list <<< "$fresh"
+  out=$(COVERED="" plain_files 10 superseded "$q" "${list[@]}")
+  [[ -n "$out" ]] || return 0
+  FRESH+=$'\n'"== own memory that the index of hub $addr does not have yet (plain text)"$'\n'"$(plain_lines "$q" <<< "$out")"
 }
 
 search_hubs() {
-  # What other members of the connected hubs wrote. With --here, only the hub that holds
-  # this project, and only this project in it.
-  local here=$1 key="" addr clone login url secret out dir why idx base; shift
-  local -a words; read -ra words <<< "$*"
+  # search_hubs <key or nothing> <query>: the hubs' part of a search. A hub with a search of
+  # its own answers for the user's own memory it holds and for other members'. For a hub
+  # without one, or when it fails, other members' memory is searched as plain text in its
+  # clone, and the user's own is left to the local providers. With a key, only the hub
+  # that holds that project, and only that project in it.
+  local key=$1 q=$2 addr clone login url secret out dir why idx base
   [[ -f "$(dirname "$CONFIG_FILE")/storage.conf" ]] || return 0
-  [[ -z "$here" ]] || key=$(project_key)
   while IFS=$'\t' read -r addr clone login url secret; do
     [[ -n "$clone" ]] || continue
     dir="$clone/projects${key:+/$key}"
-    # Nobody else in scope: nothing to add to the user's own memory.
-    compgen -G "$dir/@*" >/dev/null || [[ -z "$key" ]] || continue
-    out=""; why="its search did not answer"
+    why="its search did not answer"
     [[ "$url" != - ]] || why="it has no search of its own"
     # For a hub whose README does not name its search yet.
     [[ -z "${MEMORY_3LAYER_SEARCH_URL:-}" ]] || url=$MEMORY_3LAYER_SEARCH_URL
     if [[ "$url" != - && "$secret" != - && "$(url_host "$url")" == "$(url_host "$addr")" ]] \
-       && out=$(hub_query "$url" "$secret" "$key" "$login" "$clone" "$*"); then
+       && out=$(hub_query "$url" "$secret" "$key" "$q"); then
       # The index is built after a push, in the background: say when it lags behind.
-      idx=${out%%$'\n'*}; idx=${idx#"#indexed "}; out=$(printf '%s\n' "$out" | sed 1d)
+      idx=${out%%$'\n'*}; idx=${idx#"#indexed "}
       base=$(cat "$clone.base" 2>/dev/null)
       if [[ -n "$base" && "$idx" != - ]] && git -C "$clone" cat-file -e "$idx^{commit}" 2>/dev/null \
          && ! git -C "$clone" merge-base --is-ancestor "$base" "$idx" 2>/dev/null; then
         echo "search: the hub has not indexed the latest push yet; its answer is from before it." >&2
       fi
-      [[ -n "$out" ]] || continue
-      printf '\n== other members, hub %s\n%s\n' "$addr" "$out"
+      hub_rows "$addr" "$clone" "$login" "$(printf '%s\n' "$out" | sed 1d)"
+      hub_covers "$addr" "$clone" "$login" "$key" "$idx" "$q"
     else
+      # Nobody else in scope: nothing to add to the user's own memory.
+      compgen -G "$dir/@*" >/dev/null || [[ -z "$key" ]] || continue
       [[ -d "$dir" ]] || continue
-      out=$(plain_files 5 "$dir" "@$login" "${words[@]}")
+      out=$(plain_files 5 "@$login" "$q" "$dir")
       [[ -n "$out" ]] || continue
-      printf '\n== other members, hub %s (%s: plain text over the local copy)\n' "$addr" "$why"
-      plain_lines "${words[@]}" <<< "$out"
+      OTHERS+=$'\n'"== other members, hub $addr ($why: plain text over the local copy)"$'\n'"$(plain_lines "$q" <<< "$out")"
     fi
   done < <(MEMORY_3LAYER_HOME="$HOME_DIR" MEMORY_3LAYER_STATE="$STATE_DIR" MEMORY_3LAYER_CONFIG_DIR="$(dirname "$CONFIG_FILE")" MEMORY_3LAYER_SECRETS="$SECRETS_DIR" \
              bash "$SELF_DIR/memory-sync.sh" hubs ${key:+"$key"} 2>/dev/null </dev/null)
